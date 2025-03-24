@@ -1,98 +1,86 @@
-### Imports
+"""
+Apoptosis Annotation Matching and Evaluation
+
+This module matches manually annotated apoptotic events with automatically detected
+cell nuclei from a segmentation pipeline. It evaluates the accuracy of automated
+detection against expert annotations and generates visualizations of matching metrics.
+
+The workflow includes:
+1. Loading manual annotations of apoptotic events
+2. Loading segmentation masks and tracking data
+3. Matching manual annotations with automatically detected nuclei
+4. Calculating matching metrics (success rate, distances)
+5. Generating histograms of matching distances
+
+The module compares two matching approaches and provides visualization of the distance
+distributions between manual annotations and automated detections.
+
+Requirements:
+- numpy, pandas
+- matplotlib
+- preprocessing module with custom functions (get_image_paths, match_annotations)
+
+Inputs:
+- Manual apoptosis annotations (.csv)
+- Segmentation masks (.npz)
+- Tracked masks with object IDs (.npz)
+- Segmentation details (.pkl)
+
+Outputs:
+- Matched annotation files (.csv): Manual annotations with corresponding automated detections
+- Distance histograms (.png): Visualization of matching accuracy
+
+"""
+
+# Imports
 # Standard library imports
-import json
-import os
-import shutil
 import logging
+import os
+import pickle
 import sys
+from datetime import datetime
 
 # Third-party imports
 # Data handling
 import numpy as np
 import pandas as pd
 
-# Image I/O and processing
-import tifffile as tiff
-from nd2reader import ND2Reader
-from skimage.morphology import remove_small_objects
-
-
-# Tracking
-import btrack
-from btrack.constants import BayesianUpdates
-
 # Visualization
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 
 # Utilities
-from tqdm import tqdm
-
-from datetime import datetime
-
-import pickle
-
-from preprocessing import (load_image_stack,
-                           get_image_paths,
-                           match_annotations)
+from preprocessing import get_image_paths, match_annotations
 
 
-
-## Variables
-## Directory Paths
+# Variables
+# Directory Paths
 # Input
-IMG_DIR = '/mnt/imaging.data/PertzLab/apoDetection/TIFFs'
+IMG_DIR = '/mnt/imaging.data/PertzLab/apoDetection/TIFFs'   # For filenames
 APO_DIR = '/mnt/imaging.data/PertzLab/apoDetection/ApoptosisAnnotation'
-EXPERIMENT_INFO = '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv'
 DETAILS_DIR = '../data/details_test'
-TRACKED_MASK_DIR = '../data/tracked_masks'
-
-# Output
 MASK_DIR = '../data/apo_masks'    # Stardist label predictions
-CSV_DIR = '../data/apo_match_csv_test'    # File with manual and stardist centroids
-DF_DIR = '../data/summary_dfs'
-CROPS_DIR = '../data/apo_crops_test'    # Directory with .tif files for QC
-WINDOWS_DIR = '/home/nbahou/myimaging/apoDet/data/windows_test'    # Directory with crops for scDINO
-RANDOM_DIR = os.path.join(WINDOWS_DIR, 'random')
-CLASS_DCT_PATH = './extras/class_dicts'
+TRACKED_MASK_DIR = '../data/tracked_masks'
+# Output
+CSV_DIR = '../data/apo_match_csv_test'  # File with manual + stardist centroids
+
 # Define Plot directory
 PLOT_DIR = "/home/nbahou/myimaging/apoDet/data/plots"
 RUN_NAME = "test"
 
-
-## Processing Configuration
-COMPARE_2D_VERS = True
-SAVE_MASKS = True
-LOAD_MASKS = True
-USE_GPU = True
-MIN_NUC_SIZE = 200
-
-## Tracking Parameters
-BT_CONFIG_FILE = "extras/cell_config.json"  # Path to btrack config file
-EPS_TRACK = 70         # Tracking radius [px]
-TRK_MIN_LEN = 25       # Minimum track length [frames]
-
-#
-MAX_TRACKING_DURATION = 20    # In minutes
-FRAME_INTERVAL = 5    # minutes between images we want
-
-WINDOW_SIZE = 61
-
-
-## Logger Set Up
-#logging.shutdown()    # For jupyter notebooks
+# Logger Set Up
+# logging.shutdown()    # For jupyter notebooks
 logger = logging.getLogger(__name__)
-#if logger.hasHandlers():
+# if logger.hasHandlers():
 #    logger.handlers.clear()
 # Get the current timestamp
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 # Define log directory and ensure it exists
-log_dir = "./logs"  # Folder for logs
-os.makedirs(log_dir, exist_ok=True)  # Create directory if it doesn't exist
+LOG_DIR = "./logs"  # Folder for logs
+os.makedirs(LOG_DIR, exist_ok=True)  # Create directory if it doesn't exist
 
-log_filename = f"match_annos_{timestamp}.log"
-log_path = os.path.join(log_dir, log_filename)
+LOG_FILENAME = f"match_annos_{timestamp}.log"
+log_path = os.path.join(LOG_DIR, LOG_FILENAME)
 
 # Set up logging
 logging.basicConfig(
@@ -102,7 +90,7 @@ logging.basicConfig(
         logging.FileHandler(log_path),
         logging.StreamHandler(sys.stdout)  # Outputs to console too
     ],
-    force = True
+    force=True
 )
 
 # Create a logger instance
@@ -115,39 +103,36 @@ logging.getLogger('btrack').setLevel(logging.WARNING)
 # Load image paths in specified directory
 logger.info("Starting Image Processing")
 image_paths = get_image_paths(os.path.join(IMG_DIR))
-filenames = [os.path.splitext(os.path.basename(path))[0] for path in image_paths[:2]]    ### TODO remove :2 here, was only for testing
+filenames = [os.path.splitext(os.path.basename(path))[0]
+             for path in image_paths[:2]]    # TODO remove :2 here, was only for testing
 logger.info(f"Detected {len(filenames)} files in specified directories.")
-#print(filenames)
+# print(filenames)
 
-# TODO Create directories for saving if they do not exist
-output_dirs = [CSV_DIR, MASK_DIR, DF_DIR, CROPS_DIR, CLASS_DCT_PATH, WINDOWS_DIR]
+# Create directories for saving if they do not exist
+output_dirs = [CSV_DIR]
 for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
 
-## Lists and counters for evaluation of the matching and cropping process
+# Lists and counters for evaluation of the matching and cropping process
 # Initialize list to collect distances between stardist and manual annotations for evaluation
 dist_paolo_stardist = []
 dist_alt_matching = []
 # Initialize counter for evaluation of num matches/mismatches
-num_matches = 0
-num_mismatches = 0
-# initalize a list to investigate track lengths after apoptosis
-survival_times = []
-
-
+num_matches_total = 0
+num_mismatches_total = 0
 # Loop over all files in target directory (predict labels, track and crop windows for each)
 logger.info("Starting to process files.")
 for path, filename in zip(image_paths, filenames):
     logger.info(f"Processing {filename}")
 
-
-
-    ### Match manual and stardist annotations
+    # Match manual and stardist annotations
     logger.info("\tMatching manual and stardist annotations")
-    # Read CSV with manual apoptosis annotations 
+    # Read CSV with manual apoptosis annotations
     apo_file = os.path.join(APO_DIR, f'{filename}.csv')
-    apo_annotations = pd.read_csv(apo_file, header=None, names=['filename', 'x', 'y', 't'])
+    apo_annotations = pd.read_csv(apo_file,
+                                  header=None,
+                                  names=['filename', 'x', 'y', 't'])
 
     # Read details file from stardist (with centroids, etc.)
     details_path = os.path.join(DETAILS_DIR, f'{filename}.pkl')
@@ -162,21 +147,33 @@ for path, filename in zip(image_paths, filenames):
     # Load stardist segmentation masks
     mask_path = os.path.join(MASK_DIR, f'{filename}.npz')
     loaded_data = np.load(mask_path)  # Load the .npz file
-    gt_filtered = loaded_data['gt']      
+    gt_filtered = loaded_data['gt']
 
-    apo_annotations, metrics = match_annotations(apo_annotations, details, tracked_masks, gt_filtered)
+    apo_annotations, metrics = match_annotations(apo_annotations,
+                                                 details,
+                                                 tracked_masks,
+                                                 gt_filtered)
 
-    num_matches += metrics['num_matches']
-    num_mismatches += metrics['num_mismatches']
+    num_matches = metrics['num_matches']
+    num_mismatches = metrics['num_mismatches']
+
+    logger.info(f"Found {num_matches} matches and {num_mismatches} mismatches.")
+    logger.info(f"{num_matches/(num_matches+num_mismatches)}% Success Rate")
+
+    num_matches_total += num_matches
+    num_mismatches_total += num_mismatches
+
     dist_paolo_stardist.append(metrics['dist_paolo_stardist'])
     dist_alt_matching.append(metrics['dist_alt_matching'])
-    
 
-    # Save again as CSV with added stardist centroids      
-    apo_annotations.to_csv(os.path.join(CSV_DIR, f'{filename}.csv'), index=False)
-    logger.info(f"\t\tApo-Annotations with stardist centroids saved at: {os.path.join(CSV_DIR, f'{filename}.csv')}")
+    # Save again as CSV with added stardist centroids
+    apo_annotations.to_csv(os.path.join(CSV_DIR, f'{filename}.csv'),
+                           index=False)
+    apo_path = os.path.join(CSV_DIR, f'{filename}.csv')
+    logger.info(f"\t\tApo-Annotations with new centroids saved at: {apo_path}")
 
-
+logger.info(f"Total matches found: {num_matches_total}")
+logger.info(f"Total mismatches found: {num_mismatches_total}")
 
 # Plotting
 output_dir = os.path.join(PLOT_DIR, RUN_NAME)
@@ -188,7 +185,12 @@ dist_alt_matching_flat = np.concatenate(dist_alt_matching).tolist()
 
 # Create histogram
 plt.figure(figsize=(8, 6))
-plt.hist(dist_paolo_stardist_flat, bins=25, range=(0, 50), color='blue', edgecolor='black', alpha=0.7)
+plt.hist(dist_paolo_stardist_flat,
+         bins=25,
+         range=(0, 50),
+         color='blue',
+         edgecolor='black',
+         alpha=0.7)
 plt.xlim(0, 50)
 
 # Labels and title
@@ -207,8 +209,18 @@ plt.close()
 
 # Plot histograms
 plt.figure(figsize=(10, 5))
-plt.hist(dist_paolo_stardist_flat, bins=30, alpha=0.5, label="Original Matching", color='blue', range=(0, 60))
-plt.hist(dist_alt_matching_flat, bins=30, alpha=0.5, label="L2 Norm Matching", color='red', range=(0, 60))
+plt.hist(dist_paolo_stardist_flat,
+         bins=30,
+         alpha=0.5,
+         label="Original Matching",
+         color='blue',
+         range=(0, 60))
+plt.hist(dist_alt_matching_flat,
+         bins=30,
+         alpha=0.5,
+         label="L2 Norm Matching",
+         color='red',
+         range=(0, 60))
 plt.xlabel("Distance")
 plt.ylabel("Frequency")
 plt.title("Comparison of Matching Approaches")
