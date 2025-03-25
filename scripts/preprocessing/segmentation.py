@@ -7,7 +7,7 @@ import logging
 
 
 
-from io_utils import load_image_stack
+from .io_utils import load_image_stack
 
 
 
