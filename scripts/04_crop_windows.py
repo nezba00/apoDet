@@ -68,8 +68,8 @@ TRACKED_MASK_DIR = '../data/tracked_masks'
 TRACK_DF_DIR = '../data/track_dfs'
 
 # Output
-CROPS_DIR = '../data/apo_crops_test'    # Directory with .tif files for QC
-WINDOWS_DIR = '/home/nbahou/myimaging/apoDet/data/windows_test'    # Directory with crops for scDINO
+CROPS_DIR = '../data/apo_crops_48'    # Directory with .tif files for QC
+WINDOWS_DIR = '/home/nbahou/myimaging/apoDet/data/windows_48'    # Directory with crops for scDINO
 
 # Plots
 PLOT_DIR = "/home/nbahou/myimaging/apoDet/data/plots"
@@ -83,7 +83,7 @@ TRK_MIN_LEN = 25       # Minimum track length [frames]
 MAX_TRACKING_DURATION = 20    # In minutes
 FRAME_INTERVAL = 5    # minutes between images we want
 
-WINDOW_SIZE = 61
+WINDOW_SIZE = 48
 
 
 # Logger Set Up
@@ -177,7 +177,7 @@ for path, filename in zip(image_paths, filenames):
     is_valid, result = check_temporal_compatibility(filename,
                                                     experiments_list,
                                                     FRAME_INTERVAL)
-    print(f"Valid Stack = {is_valid}: acq_freq = {result}")
+    # print(f"Valid Stack = {is_valid}: acq_freq = {result}")
 
     # Skip current file if it is not compatible temporally
     if not is_valid:
@@ -189,7 +189,7 @@ for path, filename in zip(image_paths, filenames):
     step = FRAME_INTERVAL // acquisition_freq    # e.g. 5 // 1 = 1 image every 5 frames
     num_frames = MAX_TRACKING_DURATION // acquisition_freq
     # Adds + 1 if even to have the annotated pixel centered in the window
-    target_size = WINDOW_SIZE if WINDOW_SIZE%2 != 0 else WINDOW_SIZE + 1
+    target_size = WINDOW_SIZE # if WINDOW_SIZE%2 != 0 else WINDOW_SIZE + 1
 
     logger.debug("\tTime Info:")
     logger.debug(f"\t\t File Interval: {acquisition_freq} min/image")
@@ -261,6 +261,7 @@ for path, filename in zip(image_paths, filenames):
                 windows.append(window)
             else:
                 windows.append(None)
+                # print(f"{window.shape}: {target_size}")
 
         chosen_offset = None
         for offset in range(step):
@@ -282,7 +283,7 @@ for path, filename in zip(image_paths, filenames):
                         filename,
                         f'trackID_{current_track_id}.tif'
                     ),
-                    sub_windows
+                    sub_windows.transpose(1, 2, 0)
                 )
                 tiff.imwrite(
                     os.path.join(
@@ -290,7 +291,7 @@ for path, filename in zip(image_paths, filenames):
                         'apo',
                         f'apo_{filename}_{i}.tif'
                     ),
-                    sub_windows
+                    sub_windows.transpose(1, 2, 0)
                 )
                 num_apo_crops += 1
             else:
@@ -338,7 +339,7 @@ for path, filename in zip(image_paths, filenames):
                     f'no_apo_{filename}',
                     f'trackID_{track_id}.tif'
                 ),
-                windows[::step]
+                windows[::step].transpose(1, 2, 0)
             )
             tiff.imwrite(
                 os.path.join(
@@ -346,7 +347,7 @@ for path, filename in zip(image_paths, filenames):
                     'no_apo',
                     f'no_apo_{filename}_{i}.tif'
                 ),
-                windows[::step]
+                windows[::step].transpose(1, 2, 0)
             )
             num_healthy_crops += 1
         else:
@@ -369,7 +370,7 @@ for path, filename in zip(image_paths, filenames):
 
     iter_count = 0
     crop_count = 0
-    while (crop_count <= num_random_tracks) and (iter_count <= 100):
+    while (crop_count < num_random_tracks) and (iter_count <= 100):
         start_t = np.random.randint(0, len(imgs) - num_frames)
 
         # Randomly generate valid (x, y) coordinates for the crop center
@@ -408,7 +409,7 @@ for path, filename in zip(image_paths, filenames):
                     f'random_{filename}',
                     f'ID_{crop_count}.tif'
                 ),
-                windows
+                windows.transpose(1, 2, 0)
             )
             tiff.imwrite(
                 os.path.join(
@@ -416,13 +417,13 @@ for path, filename in zip(image_paths, filenames):
                     'random',
                     f'random_{filename}_{crop_count}.tif'
                 ),
-                windows
+                windows.transpose(1, 2, 0)
             )
             crop_count += 1
             iter_count += 1
         else:
-            logger.warning(f'\t\tUnable to collect the desired number of \
-                           images. Length windows = {len(windows)}')
+            logger.warning(f'\t\tUnable to collect the desired number of '
+                           f'images. Length windows = {len(windows)}')
             iter_count += 1
 
     logger.info(f"Finished processing {filename}: apo ({num_apo_crops}), \
