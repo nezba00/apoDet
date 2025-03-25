@@ -4,3 +4,5 @@
 **/models
 *.json
 *.log
+**/slurm_out
+**/__pycache__
