@@ -10,7 +10,7 @@ It consolidates settings for:
 from pathlib import Path
 
 # Global settings
-RUN_NAME = "test"
+RUN_NAME = "test_health_filter"
 
 # Base directories
 BASE_DATA_DIR = Path("../data") / RUN_NAME
@@ -22,6 +22,7 @@ MASK_DIR = BASE_DATA_DIR / "apo_masks"
 DF_DIR = BASE_DATA_DIR / "summary_dfs"
 DETAILS_DIR = BASE_DATA_DIR / "details"
 TRACKED_MASK_DIR = BASE_DATA_DIR / "tracked_masks"
+TRACKED_MASK_TIFF = BASE_DATA_DIR / "tracked_masks_tiff"
 TRACK_DF_DIR = BASE_DATA_DIR / "track_dfs"
 MATCH_CSV_DIR = BASE_DATA_DIR / "apo_match_csv"
 PLOT_DIR = BASE_DATA_DIR / "plots"
@@ -90,9 +91,15 @@ APO_CROP_CONFIG = {
     'WINDOWS_DIR': BASE_DATA_DIR / 'windows',  # Output: Crops for machine learning (e.g., scDINO)
     'PLOT_DIR': PLOT_DIR,                           # Directory to save survival time histograms, etc.
     'RUN_NAME': RUN_NAME,                             # Run identifier for cropping
+    'BAD_CROPS': BASE_DATA_DIR / 'bad_crops',
+    'FEATURES_DIR': BASE_DATA_DIR / 'features_df',
     'TRK_MIN_LEN': 25,                              # Minimum track length in frames (used for filtering)
     'MAX_TRACKING_DURATION': 20,                    # Maximum tracking duration in minutes
     'FRAME_INTERVAL': 5,                            # Temporal resolution between frames (in minutes)
     'WINDOW_SIZE': 48,                              # Size of spatial crops (pixels)
+    'ECCENTRICITY_THR': 0.4,
+    'SOLIDITY_THR': 0.925,
+    'CROP_STD_THR': 1000,
+    'CROP_MEAN_INT_THR': 3000,
     'LOG_DIR': LOG_DIR,
 }

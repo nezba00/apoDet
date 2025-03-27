@@ -48,6 +48,7 @@ import pandas as pd
 
 # Image I/O and processing
 import tifffile as tiff
+from skimage import util, measure
 
 # Visualization
 import matplotlib.pyplot as plt
@@ -71,6 +72,8 @@ TRACK_DF_DIR = APO_CROP_CONFIG['TRACK_DF_DIR']
 # Output
 CROPS_DIR = APO_CROP_CONFIG['CROPS_DIR']    # Directory with .tif files for QC
 WINDOWS_DIR = APO_CROP_CONFIG['WINDOWS_DIR']    # Directory with crops for scDINO
+BAD_CROPS = APO_CROP_CONFIG['BAD_CROPS']
+FEATURES_DIR = APO_CROP_CONFIG['FEATURES_DIR']
 
 # Plots
 PLOT_DIR = APO_CROP_CONFIG['PLOT_DIR']
@@ -86,6 +89,10 @@ FRAME_INTERVAL = APO_CROP_CONFIG['FRAME_INTERVAL']  # minutes between images
 
 WINDOW_SIZE = APO_CROP_CONFIG['WINDOW_SIZE']
 
+ECCENTRICITY_THR = APO_CROP_CONFIG['ECCENTRICITY_THR']
+SOLIDITY_THR = APO_CROP_CONFIG['SOLIDITY_THR']
+CROP_STD_THR = APO_CROP_CONFIG['CROP_STD_THR']
+CROP_MEAN_INT_THR = APO_CROP_CONFIG['CROP_MEAN_INT_THR']
 
 
 # Logger Set Up
@@ -126,7 +133,7 @@ filenames = [os.path.splitext(os.path.basename(path))[0]
 logger.info(f"Detected {len(filenames)} files in specified directories.")
 
 # Create directories for saving if they do not exist
-output_dirs = [CROPS_DIR, WINDOWS_DIR]
+output_dirs = [CROPS_DIR, WINDOWS_DIR, BAD_CROPS, FEATURES_DIR]
 for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
@@ -143,7 +150,7 @@ num_timepoints = MAX_TRACKING_DURATION // FRAME_INTERVAL    # eg 20mins/5min = 4
 # Lists and counters for evaluation of the matching and cropping process
 # initalize a list to investigate track lengths after apoptosis
 survival_times = []
-
+all_features = []
 
 # Loop over all files in target directory (predict labels, track and crop windows for each)
 logger.info("Starting to process files.")
@@ -203,6 +210,7 @@ for path, filename in zip(image_paths, filenames):
     os.makedirs(os.path.join(WINDOWS_DIR, 'no_apo'), exist_ok=True)
     os.makedirs(os.path.join(CROPS_DIR, f'random_{filename}'), exist_ok=True)
     os.makedirs(os.path.join(WINDOWS_DIR, 'random'), exist_ok=True)
+    os.makedirs(os.path.join(BAD_CROPS, f'no_apo_{filename}'), exist_ok=True)
 
     # Load images to extract windows
     imgs = load_image_stack(os.path.join(IMG_DIR, f'{filename}.tif'))
@@ -323,37 +331,76 @@ for path, filename in zip(image_paths, filenames):
             single_cell_df['t'] <= start_t + num_frames
             ]
         windows = []
+        mask_windows = []
         for _, sc_row in single_cell_df.iterrows():
             window = crop_window(imgs[int(sc_row['t'])],
                                  int(sc_row['x']), int(sc_row['y']),
                                  WINDOW_SIZE)
+            mask_window = crop_window(tracked_masks[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), WINDOW_SIZE)  ###
+            mask_window = mask_window.astype(int)
+            mask_window[mask_window != track_id] = 0
             if window.shape == (target_size, target_size):
                 windows.append(window)
+                mask_windows.append(mask_window)
 
         if len(windows) == (MAX_TRACKING_DURATION) + 1:
+            current_features = []
+            for mask, img in zip(mask_windows, windows):    ###
+                props = measure.regionprops_table(mask, img, properties=['label', 'eccentricity',
+                                                                         'intensity_mean', 'intensity_std',
+                                                                         'solidity', ])   ###
+                feature_df = pd.DataFrame(props)
+                
+                if not feature_df.empty:
+                    current_features.append(feature_df)
+                # print(feature_df)
+            if current_features:  # If any features were found for this track
+                # Concatenate the features from this track into one DataFrame
+                track_features = pd.concat(current_features, ignore_index=True)
+                track_features['x'] = single_cell_df['x'].iloc[0]
+                track_features['y'] = single_cell_df['y'].iloc[0]
+                track_features['t'] = start_t
+                mean_features = track_features.mean()
+                # Add to the overall list
+                all_features.append(mean_features)
+
+            mean_eccentricity = mean_features['eccentricity']
+            mean_intensity = mean_features['intensity_mean']
+            mean_std = mean_features['intensity_std']
+            mean_solidity = mean_features['solidity']
+
             windows = np.asarray(windows)
-            tiff.imwrite(
-                os.path.join(
-                    CROPS_DIR,
-                    f'no_apo_{filename}',
-                    f'trackID_{track_id}.tif'
-                ),
-                windows[::step].transpose(1, 2, 0)
-            )
-            tiff.imwrite(
-                os.path.join(
-                    WINDOWS_DIR,
-                    'no_apo',
-                    f'no_apo_{filename}_{i}.tif'
-                ),
-                windows[::step].transpose(1, 2, 0)
-            )
-            num_healthy_crops += 1
-        else:
-            rejected_windows += 1
+
+
+            if any((mean_eccentricity < ECCENTRICITY_THR,
+                   mean_std > CROP_STD_THR,
+                   mean_intensity > CROP_MEAN_INT_THR,
+                   mean_solidity < SOLIDITY_THR)):
+                tiff.imwrite(os.path.join(BAD_CROPS, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows[::step].transpose(1, 2, 0))
+                rejected_windows += 1
+            else:
+                tiff.imwrite(
+                    os.path.join(
+                        CROPS_DIR,
+                        f'no_apo_{filename}',
+                        f'trackID_{track_id}.tif'
+                    ),
+                    windows[::step].transpose(1, 2, 0)
+                )
+                tiff.imwrite(
+                    os.path.join(
+                        WINDOWS_DIR,
+                        'no_apo',
+                        f'no_apo_{filename}_{i}.tif'
+                    ),
+                    windows[::step].transpose(1, 2, 0)
+                )
+                num_healthy_crops += 1
+
+            
 
             logger.debug('\t\tAt least one of the images has the wrong size. '
-                         'Length = {len(windows)}. '
+                         f'Length = {len(windows)}. '
                          f'Pos = {sc_row["x"]}, {sc_row["y"]}.')
     logger.info(f"\t\tFound {num_healthy_crops} valid crops of healthy cells.")
     if rejected_windows > 0:
@@ -469,3 +516,85 @@ plt.savefig(plot_filename)
 
 # Close the plot to free up memory
 plt.close()
+
+from scipy.stats import gaussian_kde
+
+
+# Style parameters
+plt.style.use('seaborn-v0_8-colorblind')
+
+
+def plot_feature(data, feature_name, cutoff, xlim, comparison='>', units='', bins=20, output_dir='.'):
+    """Enhanced plotting function with shaded regions and annotations"""
+    text_xpos = 0.95  # Right-aligned annotations
+    text_ha = 'right'
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Calculate histogram
+    counts, bins, patches = ax.hist(data, bins=bins, edgecolor='black', alpha=0.7)
+    
+    # Add KDE plot
+    kde = gaussian_kde(data)
+    x_vals = np.linspace(0, data.max(), 1000)
+    ax.plot(x_vals, kde(x_vals)*len(data)*(bins[1]-bins[0]), color='#377eb8', linewidth=2)
+    
+    # Add cutoff line
+    ax.axvline(cutoff, color='#e41a1c', linestyle='--', linewidth=2, label='Cutoff')
+    
+    if xlim is not None:
+        ax.set_xlim(xlim)
+        x_min, x_max = xlim
+    else:
+        x_min, x_max = ax.get_xlim()
+    # Shade excluded region
+    if comparison == '>':
+        mask = data > cutoff
+        shade_range = (cutoff, x_max)
+        label = f'Excluded ({comparison} {cutoff}{units})'
+    else:
+        mask = data < cutoff
+        shade_range = (x_min, cutoff)
+        label = f'Excluded ({comparison} {cutoff}{units})'
+        
+    ax.axvspan(shade_range[0], shade_range[1], color='#e41a1c', alpha=0.2, label=label)
+    
+    # Calculate and annotate percentage
+    excluded_pct = (mask.mean() * 100)
+    ax.text(text_xpos, 0.95, f'{excluded_pct:.1f}% excluded',
+            transform=ax.transAxes, ha=text_ha,
+            bbox=dict(facecolor='white', alpha=0.8))
+    
+    # Formatting
+    ax.margins(x=0)
+    ax.set_xlabel(feature_name.replace('_', ' ').title(), fontsize=12)
+    ax.set_ylabel('Number of Cells', fontsize=12)
+    ax.set_title(f'{feature_name.replace("_", " ").title()} Distribution with Cutoff', fontsize=14)
+    
+    
+    # Save and close
+    plt.savefig(os.path.join(output_dir, f'{feature_name}_distribution.png'), 
+                bbox_inches='tight', dpi=300)
+    plt.close()
+
+features_df = pd.DataFrame(all_features)
+
+features_df.to_csv(os.path.join(FEATURES_DIR, "features.csv"), header=True)
+
+# Apply to all features with your cutoffs
+plot_feature(features_df['eccentricity'], 'eccentricity', 0.4, xlim=(0,1),comparison='<', output_dir=output_dir)
+plot_feature(features_df['intensity_std'], 'intensity_std', 1000, xlim=(0,3000), comparison='>', output_dir=output_dir)
+plot_feature(features_df['solidity'], 'solidity', 0.925, xlim=(0.8,1), comparison='<', output_dir=output_dir)
+plot_feature(features_df['intensity_mean'], 'intensity_mean', 3000, xlim=(0, 5500), comparison='>', output_dir=output_dir)
+
+# Survival times plot (from your example)
+plt.figure(figsize=(10, 6))
+plt.hist(survival_times, bins=20, range=(0, 200), edgecolor='black', alpha=0.7)
+plt.xlim(0, 200)
+plt.xlabel("Survival Time (frames)", fontsize=12)
+plt.ylabel("Number of Cells", fontsize=12)
+plt.title("Histogram of Cell Survival Times (Frames)", fontsize=14)
+plt.grid(True, alpha=0.4)
+plt.savefig(os.path.join(output_dir, "survival_times_histogram.png"), 
+           bbox_inches='tight', dpi=300)
+plt.close()
+
