@@ -39,7 +39,7 @@ def match_annotations(apo_annotations, details, tracked_masks, gt_filtered):
         centroids = np.array(details[t]['points'])  # Convert list to NumPy array
         
         # Compute Euclidean distances
-        distances = np.linalg.norm(centroids - np.array([x, y]), axis=1)
+        distances = np.linalg.norm(centroids - np.array([y, x]), axis=1)
         match_index = np.argmin(distances)
         alt_distance_to_paolo = distances[match_index]
         dist_alt_matching.append(alt_distance_to_paolo)
