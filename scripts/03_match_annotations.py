@@ -49,34 +49,31 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Utilities
-from preprocessing import get_image_paths, match_annotations
+from preprocessing import get_image_paths, match_annotations, APO_MATCH_CONFIG
 
 
 # Variables
 # Directory Paths
 # Input
-IMG_DIR = '/mnt/imaging.data/PertzLab/apoDetection/TIFFs'   # For filenames
-APO_DIR = '/mnt/imaging.data/PertzLab/apoDetection/ApoptosisAnnotation'
-DETAILS_DIR = '../data/details_test'
-MASK_DIR = '../data/apo_masks'    # Stardist label predictions
-TRACKED_MASK_DIR = '../data/tracked_masks'
+IMG_DIR = APO_MATCH_CONFIG['IMG_DIR']   # For filenames
+APO_DIR = APO_MATCH_CONFIG['APO_DIR']
+DETAILS_DIR = APO_MATCH_CONFIG['DETAILS_DIR']
+MASK_DIR = APO_MATCH_CONFIG['MASK_DIR'] # Stardist label predictions    
+TRACKED_MASK_DIR = APO_MATCH_CONFIG['TRACKED_MASK_DIR']
 # Output
-CSV_DIR = '../data/apo_match_csv_test'  # File with manual + stardist centroids
+CSV_DIR = APO_MATCH_CONFIG['CSV_DIR']   # File with manual + stardist centroids
 
 # Define Plot directory
-PLOT_DIR = "/home/nbahou/myimaging/apoDet/data/plots"
-RUN_NAME = "test"
+PLOT_DIR = APO_MATCH_CONFIG['PLOT_DIR']
+RUN_NAME = APO_MATCH_CONFIG['RUN_NAME']
 
 # Logger Set Up
-# logging.shutdown()    # For jupyter notebooks
 logger = logging.getLogger(__name__)
-# if logger.hasHandlers():
-#    logger.handlers.clear()
 # Get the current timestamp
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 # Define log directory and ensure it exists
-LOG_DIR = "./logs"  # Folder for logs
+LOG_DIR = APO_MATCH_CONFIG['LOG_DIR']   # Folder for logs
 os.makedirs(LOG_DIR, exist_ok=True)  # Create directory if it doesn't exist
 
 LOG_FILENAME = f"match_annos_{timestamp}.log"
@@ -106,7 +103,6 @@ image_paths = get_image_paths(os.path.join(IMG_DIR))
 filenames = [os.path.splitext(os.path.basename(path))[0]
              for path in image_paths[:2]]    # TODO remove :2 here, was only for testing
 logger.info(f"Detected {len(filenames)} files in specified directories.")
-# print(filenames)
 
 # Create directories for saving if they do not exist
 output_dirs = [CSV_DIR]
@@ -157,8 +153,8 @@ for path, filename in zip(image_paths, filenames):
     num_matches = metrics['num_matches']
     num_mismatches = metrics['num_mismatches']
 
-    logger.info(f"Found {num_matches} matches and {num_mismatches} mismatches.")
-    logger.info(f"{num_matches/(num_matches+num_mismatches)}% Success Rate")
+    logger.info(f"\t\tFound {num_matches} matches and {num_mismatches} mismatches.")
+    logger.info(f"\t\t{(num_matches*100)/(num_matches+num_mismatches)}% Success Rate")
 
     num_matches_total += num_matches
     num_mismatches_total += num_mismatches
@@ -172,8 +168,9 @@ for path, filename in zip(image_paths, filenames):
     apo_path = os.path.join(CSV_DIR, f'{filename}.csv')
     logger.info(f"\t\tApo-Annotations with new centroids saved at: {apo_path}")
 
-logger.info(f"Total matches found: {num_matches_total}")
-logger.info(f"Total mismatches found: {num_mismatches_total}")
+logger.info("Matching finished")
+logger.info(f"\tTotal matches found: {num_matches_total}")
+logger.info(f"\tTotal mismatches found: {num_mismatches_total}")
 
 # Plotting
 output_dir = os.path.join(PLOT_DIR, RUN_NAME)

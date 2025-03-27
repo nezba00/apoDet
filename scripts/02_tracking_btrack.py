@@ -49,40 +49,37 @@ import matplotlib.pyplot as plt
 
 # Utilities
 from preprocessing import (convert_obj_to_track_ids, get_image_paths,
-                           run_tracking)
+                           run_tracking, TRACKING_CONFIG)
 
 
 # Variables
 # Directory Paths
 # Input
-IMG_DIR = '/mnt/imaging.data/PertzLab/apoDetection/TIFFs'
-MASK_DIR = '../data/apo_masks'    # Stardist label predictions
-DF_DIR = '../data/summary_dfs'
+IMG_DIR = TRACKING_CONFIG['IMG_DIR']
+MASK_DIR = TRACKING_CONFIG['MASK_DIR']  # Stardist label predictions
+DF_DIR = TRACKING_CONFIG['DF_DIR']
 
 # Output
-TRACKED_MASK_DIR = '../data/tracked_masks'
-TRACK_DF_DIR = '../data/track_dfs'
+TRACKED_MASK_DIR = TRACKING_CONFIG['TRACKED_MASK_DIR']
+TRACK_DF_DIR = TRACKING_CONFIG['TRACK_DF_DIR']
 
 # Define plot directory
-PLOT_DIR = "/home/nbahou/myimaging/apoDet/data/plots"
-RUN_NAME = "test"
+PLOT_DIR = TRACKING_CONFIG['PLOT_DIR']
+RUN_NAME = TRACKING_CONFIG['RUN_NAME']
 
 # Tracking Parameters
-BT_CONFIG_FILE = "extras/cell_config.json"  # Path to btrack config file
-EPS_TRACK = 70         # Tracking radius [px]
-TRK_MIN_LEN = 25       # Minimum track length [frames]
+BT_CONFIG_FILE = TRACKING_CONFIG['BT_CONFIG_FILE']  # Path to btrack config file
+EPS_TRACK = TRACKING_CONFIG['EPS_TRACK']    # Tracking radius [px]
+TRK_MIN_LEN = TRACKING_CONFIG['TRK_MIN_LEN']    # Minimum track length [frames]
 
 
 # Logger Set Up
-# logging.shutdown()    # For jupyter notebooks
 logger = logging.getLogger(__name__)
-# if logger.hasHandlers():
-#    logger.handlers.clear()
 # Get the current timestamp
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 # Define log directory and ensure it exists
-LOG_DIR = "./logs"  # Folder for logs
+LOG_DIR = TRACKING_CONFIG['LOG_DIR']    # Folder for logs
 os.makedirs(LOG_DIR, exist_ok=True)  # Create directory if it doesn't exist
 
 LOG_FILENAME = f"tracking_Btrack_{timestamp}.log"
@@ -123,6 +120,7 @@ for path in output_dirs:
 logger.info("Starting to process files.")
 for path, filename in zip(image_paths, filenames):
     # Define and load labels
+    logger.info(f"\tLoading {filename}.")
     mask_path = os.path.join(MASK_DIR, f'{filename}.npz')
     with np.load(mask_path) as data:
         gt_filtered = data['gt']  # Access the saved array

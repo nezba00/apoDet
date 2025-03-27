@@ -29,9 +29,9 @@ Outputs:
 
 """
 
-import logging
 # Imports
 # Standard library imports
+import logging
 import os
 import pickle
 import sys
@@ -44,31 +44,28 @@ import numpy as np
 from stardist.models import StarDist2D
 
 from preprocessing import (filter_segmentation, get_image_paths,
-                           run_segmentation)
+                           run_segmentation, SEGMENTATION_CONFIG)
 
 # Variables
 # Directory Paths
 # Input
-IMG_DIR = '/mnt/imaging.data/PertzLab/apoDetection/TIFFs'
+IMG_DIR = SEGMENTATION_CONFIG['IMG_DIR']
 # Output
-MASK_DIR = '../data/apo_masks_test'    # Stardist label predictions
-DF_DIR = '../data/summary_dfs_test'
-DETAILS_DIR = '../data/details_test'
-LOG_DIR = "./logs"  # Folder for logs
+MASK_DIR = SEGMENTATION_CONFIG['MASK_DIR']  # Stardist label predictions
+DF_DIR = SEGMENTATION_CONFIG['DF_DIR']
+DETAILS_DIR = SEGMENTATION_CONFIG['DETAILS_DIR']
+LOG_DIR = SEGMENTATION_CONFIG['LOG_DIR']  # Folder for logs
 
 
 # Processing Configuration
-SAVE_DATA = True
-USE_GPU = True
+SAVE_DATA = SEGMENTATION_CONFIG['SAVE_DATA']
+USE_GPU = SEGMENTATION_CONFIG['USE_GPU']
 
-MIN_NUC_SIZE = 200  # Removes objects < x
+MIN_NUC_SIZE = SEGMENTATION_CONFIG['MIN_NUC_SIZE']  # Removes objects < x
 
 
 # Logger Set Up
-# logging.shutdown()    # For jupyter notebooks
 logger = logging.getLogger(__name__)
-# if logger.hasHandlers():
-#    logger.handlers.clear()
 # Get the current timestamp
 # Define log directory and ensure it exists
 os.makedirs(LOG_DIR, exist_ok=True)  # Create directory if it doesn't exist

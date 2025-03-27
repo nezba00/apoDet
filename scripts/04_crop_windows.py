@@ -55,47 +55,46 @@ import matplotlib.pyplot as plt
 # Utilities
 from tqdm import tqdm
 from preprocessing import (check_temporal_compatibility, crop_window,
-                           get_image_paths, load_image_stack)
+                           get_image_paths, load_image_stack,
+                           APO_CROP_CONFIG)
 
 
 # Variables
 # Directory Paths
 # Input
-IMG_DIR = '/mnt/imaging.data/PertzLab/apoDetection/TIFFs'
-EXPERIMENT_INFO = '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv'
-CSV_DIR = '../data/apo_match_csv_test'    # File with manual and stardist centroids
-TRACKED_MASK_DIR = '../data/tracked_masks'
-TRACK_DF_DIR = '../data/track_dfs'
+IMG_DIR = APO_CROP_CONFIG['IMG_DIR']
+EXPERIMENT_INFO = APO_CROP_CONFIG['EXPERIMENT_INFO']
+CSV_DIR = APO_CROP_CONFIG['CSV_DIR']    # File with manual and stardist centroids
+TRACKED_MASK_DIR = APO_CROP_CONFIG['TRACKED_MASK_DIR']
+TRACK_DF_DIR = APO_CROP_CONFIG['TRACK_DF_DIR']
 
 # Output
-CROPS_DIR = '../data/apo_crops_48'    # Directory with .tif files for QC
-WINDOWS_DIR = '/home/nbahou/myimaging/apoDet/data/windows_48'    # Directory with crops for scDINO
+CROPS_DIR = APO_CROP_CONFIG['CROPS_DIR']    # Directory with .tif files for QC
+WINDOWS_DIR = APO_CROP_CONFIG['WINDOWS_DIR']    # Directory with crops for scDINO
 
 # Plots
-PLOT_DIR = "/home/nbahou/myimaging/apoDet/data/plots"
-RUN_NAME = "test"
+PLOT_DIR = APO_CROP_CONFIG['PLOT_DIR']
+RUN_NAME = APO_CROP_CONFIG['RUN_NAME']
 
 
 # Tracking Parameters
-TRK_MIN_LEN = 25       # Minimum track length [frames]
+TRK_MIN_LEN = APO_CROP_CONFIG['TRK_MIN_LEN']    # Minimum track length [frames]
 
 # Time settings
-MAX_TRACKING_DURATION = 20    # In minutes
-FRAME_INTERVAL = 5    # minutes between images we want
+MAX_TRACKING_DURATION = APO_CROP_CONFIG['MAX_TRACKING_DURATION']    # In minutes
+FRAME_INTERVAL = APO_CROP_CONFIG['FRAME_INTERVAL']  # minutes between images
 
-WINDOW_SIZE = 48
+WINDOW_SIZE = APO_CROP_CONFIG['WINDOW_SIZE']
+
 
 
 # Logger Set Up
-# logging.shutdown()    # For jupyter notebooks
 logger = logging.getLogger(__name__)
-# if logger.hasHandlers():
-#    logger.handlers.clear()
 # Get the current timestamp
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 # Define log directory and ensure it exists
-LOG_DIR = "./logs"  # Folder for logs
+LOG_DIR = APO_CROP_CONFIG['LOG_DIR']    # Folder for logs  
 os.makedirs(LOG_DIR, exist_ok=True)  # Create directory if it doesn't exist
 
 LOG_FILENAME = f"crop_windows_{timestamp}.log"
