@@ -137,6 +137,8 @@ output_dirs = [CROPS_DIR, WINDOWS_DIR, BAD_CROPS, FEATURES_DIR]
 for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
+os.makedirs(os.path.join(FEATURES_DIR, 'raw_images'), exist_ok=True)
+os.makedirs(os.path.join(FEATURES_DIR, 'masks'), exist_ok=True)
 
 # Frame rate and movie length for crops
 try:
@@ -361,6 +363,7 @@ for path, filename in zip(image_paths, filenames):
                 track_features['y'] = single_cell_df['y'].iloc[0]
                 track_features['t'] = start_t
                 mean_features = track_features.mean()
+                mean_features['filename'] = f'cell_{filename}_{track_id}.tif'
                 # Add to the overall list
                 all_features.append(mean_features)
 
@@ -371,6 +374,9 @@ for path, filename in zip(image_paths, filenames):
 
             windows = np.asarray(windows)
 
+            # Save all crops for features analysis
+            tiff.imwrite(os.path.join(FEATURES_DIR, 'raw_images', f'cell_{filename}_{track_id}.tif'), windows[::step])
+            tiff.imwrite(os.path.join(FEATURES_DIR, 'masks', f'cell_{filename}_{track_id}.tif'), mask_windows[::step])
 
             if any((mean_eccentricity < ECCENTRICITY_THR,
                    mean_std > CROP_STD_THR,
