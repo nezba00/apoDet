@@ -22,7 +22,7 @@ source /home/nbahou/miniforge3/etc/profile.d/mamba.sh
 mamba activate ERK_gpu
 
 # Run the Python script
-# python 01_segment_strdst.py
-# python 02_tracking_btrack.py
-# python 03_match_annotations.py
+python 01_segment_strdst.py
+python 02_tracking_btrack.py
+python 03_match_annotations.py
 python 04_crop_windows.py

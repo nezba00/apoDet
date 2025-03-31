@@ -93,7 +93,7 @@ logger = logging.getLogger(__name__)
 logger.info("Starting Image Processing")
 image_paths = get_image_paths(os.path.join(IMG_DIR))
 filenames = [os.path.splitext(os.path.basename(path))[0]
-             for path in image_paths[:2]]     # TODO remove :2
+             for path in image_paths]
 num_files = len(filenames)
 logger.info(f"Detected {len(filenames)} files in specified directories.")
 

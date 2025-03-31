@@ -101,7 +101,7 @@ logging.getLogger('btrack').setLevel(logging.WARNING)
 logger.info("Starting Image Processing")
 image_paths = get_image_paths(os.path.join(IMG_DIR))
 filenames = [os.path.splitext(os.path.basename(path))[0]
-             for path in image_paths[:2]]    # TODO remove :2 here, was only for testing
+             for path in image_paths]
 logger.info(f"Detected {len(filenames)} files in specified directories.")
 
 # Create directories for saving if they do not exist
