@@ -49,7 +49,8 @@ import matplotlib.pyplot as plt
 
 # Utilities
 from preprocessing import (convert_obj_to_track_ids, get_image_paths,
-                           run_tracking, TRACKING_CONFIG)
+                           run_tracking, remove_outlier_frames,
+                           get_btrack_config_path, TRACKING_CONFIG)
 
 
 # Variables
@@ -71,7 +72,7 @@ RUN_NAME = TRACKING_CONFIG['RUN_NAME']
 BT_CONFIG_FILE = TRACKING_CONFIG['BT_CONFIG_FILE']  # Path to btrack config file
 EPS_TRACK = TRACKING_CONFIG['EPS_TRACK']    # Tracking radius [px]
 TRK_MIN_LEN = TRACKING_CONFIG['TRK_MIN_LEN']    # Minimum track length [frames]
-
+EXPERIMENT_INFO = TRACKING_CONFIG['EXPERIMENT_INFO']
 
 # Logger Set Up
 logger = logging.getLogger(__name__)
@@ -116,6 +117,16 @@ output_dirs = [MASK_DIR, DF_DIR, TRACK_DF_DIR, TRACKED_MASK_DIR]
 for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
+# Load experiment info to choose correct btrack config
+try:
+    experiments_list = pd.read_csv(EXPERIMENT_INFO, header=0)
+except FileNotFoundError as e:
+    logger.critical("Critical error: experiment list file not found: "
+                    f"{EXPERIMENT_INFO}. Aborting script.")
+    sys.exit(1)
+
+
+
 # Loop over all files in target directory (predict labels, track and crop windows for each)
 logger.info("Starting to process files.")
 for path, filename in zip(image_paths, filenames):
@@ -125,12 +136,22 @@ for path, filename in zip(image_paths, filenames):
     with np.load(mask_path) as data:
         gt_filtered = data['gt']  # Access the saved array
 
+    gt_filtered, indices = remove_outlier_frames(gt_filtered)
+    logger.info(f'{len(indices)} outlier frames replaced by frame with zeroes.')
+
     df_path = os.path.join(DF_DIR, f'{filename}_pd_df.csv')
     strdst_df = pd.read_csv(df_path, header=0)
 
+    btrack_config_path, custom_settings = get_btrack_config_path(filename,
+                                                                 experiments_list)
+    
+    if custom_settings:
+        track_radius = 30
+    else:
+        track_radius = EPS_TRACK
+
     # Run tracking with Btrack
-    _, fovY, fovX = gt_filtered.shape
-    dfBTracks = run_tracking(gt_filtered, fovX, fovY, BT_CONFIG_FILE, EPS_TRACK)
+    dfBTracks = run_tracking(gt_filtered, btrack_config_path, track_radius)
 
     logger.info("\tMerging information from Btrack and stardist.")
     merged_df = strdst_df.merge(dfBTracks.drop(columns=["x", "y", "area"]),
