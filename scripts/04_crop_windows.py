@@ -74,6 +74,7 @@ CROPS_DIR = APO_CROP_CONFIG['CROPS_DIR']    # Directory with .tif files for QC
 WINDOWS_DIR = APO_CROP_CONFIG['WINDOWS_DIR']    # Directory with crops for scDINO
 BAD_CROPS = APO_CROP_CONFIG['BAD_CROPS']
 FEATURES_DIR = APO_CROP_CONFIG['FEATURES_DIR']
+APO_CHECK_ARRAY_DIR = APO_CROP_CONFIG['APO_CHECK_ARRAY_DIR']
 
 # Plots
 PLOT_DIR = APO_CROP_CONFIG['PLOT_DIR']
@@ -93,7 +94,7 @@ ECCENTRICITY_THR = APO_CROP_CONFIG['ECCENTRICITY_THR']
 SOLIDITY_THR = APO_CROP_CONFIG['SOLIDITY_THR']
 CROP_STD_THR = APO_CROP_CONFIG['CROP_STD_THR']
 CROP_MEAN_INT_THR = APO_CROP_CONFIG['CROP_MEAN_INT_THR']
-
+NUM_BLOCKED_FRAMES = APO_CROP_CONFIG['NUM_BLOCKED_FRAMES']
 
 # Logger Set Up
 logger = logging.getLogger(__name__)
@@ -129,11 +130,11 @@ logging.getLogger('btrack').setLevel(logging.WARNING)
 logger.info("Starting Image Processing")
 image_paths = get_image_paths(os.path.join(IMG_DIR))
 filenames = [os.path.splitext(os.path.basename(path))[0]
-             for path in image_paths]
+             for path in image_paths[:2]]
 logger.info(f"Detected {len(filenames)} files in specified directories.")
 
 # Create directories for saving if they do not exist
-output_dirs = [CROPS_DIR, WINDOWS_DIR, BAD_CROPS, FEATURES_DIR]
+output_dirs = [CROPS_DIR, WINDOWS_DIR, BAD_CROPS, FEATURES_DIR, APO_CHECK_ARRAY_DIR]
 for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
@@ -194,7 +195,7 @@ for path, filename in zip(image_paths, filenames):
 
     # Vars for window cropping
     acquisition_freq = result
-    step = FRAME_INTERVAL // acquisition_freq    # e.g. 5 // 1 = 1 image every 5 frames
+    step = FRAME_INTERVAL // acquisition_freq    # e.g. 5 // 1 = 5 -> 1 image every 5 frames
     num_frames = MAX_TRACKING_DURATION // acquisition_freq
     # Adds + 1 if even to have the annotated pixel centered in the window
     target_size = WINDOW_SIZE # if WINDOW_SIZE%2 != 0 else WINDOW_SIZE + 1
@@ -216,6 +217,7 @@ for path, filename in zip(image_paths, filenames):
 
     # Load images to extract windows
     imgs = load_image_stack(os.path.join(IMG_DIR, f'{filename}.tif'))
+    max_t, max_y, max_x = imgs.shape
 
     # Counter so we can sample same number of random tracks as apoptotic
     num_apo_crops = 0
@@ -224,6 +226,8 @@ for path, filename in zip(image_paths, filenames):
     merged_df_long['apoptotic'] = 0
 
     apo_track_ids = pd.DataFrame(columns=['track_id', 'apo_start_t'])
+
+    apo_check_array = np.zeros_like(tracked_masks)
 
     logger.info("\tStarting cropping for apo cells")
     for i, row in tqdm(apo_annotations.iterrows(),
@@ -247,6 +251,27 @@ for path, filename in zip(image_paths, filenames):
                            f"Reason: Track lost too quickly after anno. "
                            f"len = {len(single_cell_df)}")
             continue
+
+        last_row = single_cell_df.iloc[-1]
+        last_x = int(last_row['x'])
+        last_y = int(last_row['y'])
+        last_t = int(last_row['t'])
+
+        half_window = WINDOW_SIZE // 2
+
+        # Spatial indices (clamped to array bounds)
+        x_start = max(0, last_x - half_window)
+        x_end = min(max_x, x_start + WINDOW_SIZE)  # Ensure window doesn't exceed array
+        y_start = max(0, last_y - half_window)
+        y_end = min(max_y, y_start + WINDOW_SIZE)
+
+        # Temporal indices (clamped)
+        t_end = min(max_t, last_t + NUM_BLOCKED_FRAMES//acquisition_freq)
+
+        # Set the block to 1
+        if t_end > last_t:
+            apo_check_array[last_t:t_end, y_start:y_end, x_start:x_end] = 1
+        
 
         # Count track length after manual apoptosis annotation (for histogram later)
         num_entries = single_cell_df.shape[0]
@@ -310,6 +335,14 @@ for path, filename in zip(image_paths, filenames):
                                f'{row["y"]}.')
     logger.info(f"\t\tValid crops of apo cells found for \
                 {num_apo_crops}/{len(apo_annotations)}")
+    
+    tiff.imwrite(
+        os.path.join(
+            APO_CHECK_ARRAY_DIR,
+            f'{filename}.tif'
+        ),
+        apo_check_array.transpose(1, 2, 0)
+    )
 
     num_random_tracks = num_apo_crops
 
@@ -339,11 +372,23 @@ for path, filename in zip(image_paths, filenames):
                                  int(sc_row['x']), int(sc_row['y']),
                                  WINDOW_SIZE)
             mask_window = crop_window(tracked_masks[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), WINDOW_SIZE)  ###
+            apo_window = crop_window(apo_check_array[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), WINDOW_SIZE)
+            
             mask_window = mask_window.astype(int)
             mask_window[mask_window != track_id] = 0
-            if window.shape == (target_size, target_size):
+            # Check for blocked areas and window validity
+            is_blocked = np.any(apo_window == 1)  # NEW: Check if blocked
+            is_window_valid = (window.shape == (target_size, target_size)) and (not is_blocked)
+
+            if is_window_valid:
                 windows.append(window)
                 mask_windows.append(mask_window)
+            else:
+                rejected_windows += 1
+                logger.warning(
+                    f"\t\tRejected window at (t={int(sc_row['t'])}, x={int(sc_row['x'])}, y={int(sc_row['y'])}): "
+                    f"Blocked={is_blocked}, Shape={window.shape}"
+                )
 
         if len(windows) == (MAX_TRACKING_DURATION) + 1:
             current_features = []
@@ -367,44 +412,44 @@ for path, filename in zip(image_paths, filenames):
                 # Add to the overall list
                 all_features.append(mean_features)
 
-            mean_eccentricity = mean_features['eccentricity']
-            mean_intensity = mean_features['intensity_mean']
-            mean_std = mean_features['intensity_std']
-            mean_solidity = mean_features['solidity']
+                mean_eccentricity = mean_features['eccentricity']
+                mean_intensity = mean_features['intensity_mean']
+                mean_std = mean_features['intensity_std']
+                mean_solidity = mean_features['solidity']
 
-            windows = np.asarray(windows)
+                windows = np.asarray(windows)
 
-            # Save all crops for features analysis
-            tiff.imwrite(os.path.join(FEATURES_DIR, 'raw_images', f'cell_{filename}_{track_id}.tif'), windows[::step])
-            tiff.imwrite(os.path.join(FEATURES_DIR, 'masks', f'cell_{filename}_{track_id}.tif'), mask_windows[::step])
+                # Save all crops for features analysis
+                tiff.imwrite(os.path.join(FEATURES_DIR, 'raw_images', f'cell_{filename}_{track_id}.tif'), windows[::step])
+                tiff.imwrite(os.path.join(FEATURES_DIR, 'masks', f'cell_{filename}_{track_id}.tif'), mask_windows[::step])
 
-            if any((mean_eccentricity < ECCENTRICITY_THR,
-                   mean_std > CROP_STD_THR,
-                   mean_intensity > CROP_MEAN_INT_THR,
-                   mean_solidity < SOLIDITY_THR)):
-                tiff.imwrite(os.path.join(BAD_CROPS, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows[::step].transpose(1, 2, 0))
-                rejected_windows += 1
-            else:
-                tiff.imwrite(
-                    os.path.join(
-                        CROPS_DIR,
-                        f'no_apo_{filename}',
-                        f'trackID_{track_id}.tif'
-                    ),
-                    windows[::step].transpose(1, 2, 0)
-                )
-                tiff.imwrite(
-                    os.path.join(
-                        WINDOWS_DIR,
-                        'no_apo',
-                        f'no_apo_{filename}_{i}.tif'
-                    ),
-                    windows[::step].transpose(1, 2, 0)
-                )
-                num_healthy_crops += 1
+                if any((mean_eccentricity < ECCENTRICITY_THR,
+                    mean_std > CROP_STD_THR,
+                    mean_intensity > CROP_MEAN_INT_THR,
+                    mean_solidity < SOLIDITY_THR)):
+                    tiff.imwrite(os.path.join(BAD_CROPS, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows[::step].transpose(1, 2, 0))
+                    rejected_windows += 1
+                else:
+                    tiff.imwrite(
+                        os.path.join(
+                            CROPS_DIR,
+                            f'no_apo_{filename}',
+                            f'trackID_{track_id}.tif'
+                        ),
+                        windows[::step].transpose(1, 2, 0)
+                    )
+                    tiff.imwrite(
+                        os.path.join(
+                            WINDOWS_DIR,
+                            'no_apo',
+                            f'no_apo_{filename}_{i}.tif'
+                        ),
+                        windows[::step].transpose(1, 2, 0)
+                    )
+                    num_healthy_crops += 1
 
-            
 
+        else:
             logger.debug('\t\tAt least one of the images has the wrong size. '
                          f'Length = {len(windows)}. '
                          f'Pos = {sc_row["x"]}, {sc_row["y"]}.')
@@ -436,6 +481,9 @@ for path, filename in zip(image_paths, filenames):
             track_id_mask_crop = crop_window(tracked_masks[t],
                                              random_x, random_y,
                                              WINDOW_SIZE)
+            apo_check_array_crop = crop_window(apo_check_array[t],
+                                               random_x, random_y,
+                                               WINDOW_SIZE)
             present_track_ids = track_id_mask_crop.flatten().tolist()
 
             # Continue here
@@ -447,11 +495,22 @@ for path, filename in zip(image_paths, filenames):
             is_pixel_not_in_apo = not any(pixel in current_apo_ids
                                           for pixel in present_track_ids)
             is_window_correct_size = window.shape == (target_size, target_size)
-            if is_pixel_not_in_apo and is_window_correct_size:
+             # Check if the current cropped region is blocked (contains 1s in apo_check_array)
+            is_area_blocked = np.any(apo_check_array_crop == 1)
+            if (
+                is_pixel_not_in_apo 
+                and is_window_correct_size 
+                and not is_area_blocked
+            ):
                 windows.append(window)
             else:
-                logger.warning("\t\tCurrent window contains an apoptotic cell "
-                               "or the shape is not matching the target size.")
+                if not is_pixel_not_in_apo:
+                    logger.warning("\t\tCurrent window contains an apoptotic cell.")
+                elif not is_window_correct_size:
+                    logger.warning("\t\tWindow shape does not match target size.")
+                elif is_area_blocked:
+                    logger.warning("\t\tArea is in a blocked region.")
+    
 
         if len(windows) == (MAX_TRACKING_DURATION//FRAME_INTERVAL) + 1:
             windows = np.asarray(windows)
