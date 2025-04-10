@@ -25,7 +25,7 @@ def get_image_paths(directory):
     """
     Returns a list of absolute paths of all TIFF and ND2 files in a directory.
     """
-    valid_extensions = ('.tif', '.tiff', '.nd2')
+    valid_extensions = ('.tif', '.tiff', '.nd2', '.npz')
     paths = [
         os.path.abspath(os.path.join(directory, f))
         for f in os.listdir(directory)
