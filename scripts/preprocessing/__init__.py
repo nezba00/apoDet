@@ -1,6 +1,7 @@
 from .io_utils import load_image_stack, get_image_paths
 from .segmentation import run_segmentation, filter_segmentation
-from .tracking import run_tracking, convert_obj_to_track_ids
+from .tracking import (remove_outlier_frames, run_tracking,
+                       convert_obj_to_track_ids, get_btrack_config_path)
 from .matching import match_annotations, check_temporal_compatibility
 from .cropping import crop_window
 from .config import (SEGMENTATION_CONFIG, TRACKING_CONFIG,
@@ -11,7 +12,7 @@ __all__ = [
     "run_segmentation", "filter_segmentation",
     "run_tracking", "convert_obj_to_track_ids",
     "match_annotations", "check_temporal_compatibility",
-    "crop_window",
+    "crop_window", "remove_outlier_frames", "get_btrack_config_path",
     "SEGMENTATION_CONFIG", "TRACKING_CONFIG",
     "APO_MATCH_CONFIG", "APO_CROP_CONFIG"
 ]

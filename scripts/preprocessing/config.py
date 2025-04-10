@@ -10,7 +10,7 @@ It consolidates settings for:
 from pathlib import Path
 
 # Global settings
-RUN_NAME = "test_health_filter"
+RUN_NAME = "dataset1"
 
 # Base directories
 BASE_DATA_DIR = Path("../data") / RUN_NAME
@@ -58,9 +58,11 @@ TRACKING_CONFIG = {
     'PLOT_DIR': PLOT_DIR,                           # Directory to save plots (track length histograms, etc.)
     'RUN_NAME': RUN_NAME,                             # Name identifier for this run
     'BT_CONFIG_FILE': "extras/cell_config.json",    # Config file for the BTrack algorithm
+    'BT_CONFIG_20X': "/home/nbahou/myimaging/apoDet/scripts/extras/cell_config_20x.json",
     'EPS_TRACK': 70,                                # Tracking radius in pixels
     'TRK_MIN_LEN': 25,                             # Minimum track length in frames
     'LOG_DIR': LOG_DIR,
+    'EXPERIMENT_INFO': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',  # Experiment metadata
 }
 
 # ---------------------------
@@ -102,4 +104,6 @@ APO_CROP_CONFIG = {
     'CROP_STD_THR': 1000,
     'CROP_MEAN_INT_THR': 3000,
     'LOG_DIR': LOG_DIR,
+    'NUM_BLOCKED_FRAMES': 50,
+    'APO_CHECK_ARRAY_DIR': BASE_DATA_DIR / "apo_check_arrays",
 }
