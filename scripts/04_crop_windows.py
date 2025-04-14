@@ -243,6 +243,29 @@ for path, filename in zip(image_paths, filenames):
         if not np.isscalar(current_track_id):
             current_track_id = current_track_id.iloc[0]
 
+        # Check if we found a match
+        if current_track_id == 0:
+            # If not we block a window
+            annot_x = int(row['x'])
+            annot_y = int(row['y'])
+            annot_t = int(row['t'])
+
+            # Block big windows if no match was found
+            half_window = WINDOW_SIZE
+
+            # Spatial indices (clamped to array bounds)
+            x_start = max(0, annot_x - half_window)
+            x_end = min(max_x, x_start + WINDOW_SIZE)  # Ensure window doesn't exceed array
+            y_start = max(0, annot_y - half_window)
+            y_end = min(max_y, y_start + WINDOW_SIZE)
+
+            # Temporal indices (clamped)
+            t_end = min(max_t, annot_t + NUM_BLOCKED_FRAMES//acquisition_freq)
+
+            if t_end > last_t:
+                apo_check_array[last_t:t_end, y_start:y_end, x_start:x_end] = 1
+
+
         is_correct_track = merged_df_long['track_id'] == current_track_id
         is_valid_time = merged_df_long['t'] >= current_t
         single_cell_df = merged_df_long.loc[is_correct_track & is_valid_time]
