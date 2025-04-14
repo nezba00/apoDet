@@ -56,7 +56,7 @@ import matplotlib.pyplot as plt
 # Utilities
 from tqdm import tqdm
 from preprocessing import (check_temporal_compatibility, crop_window,
-                           get_image_paths, load_image_stack,
+                           get_image_paths, load_image_stack, block_window_in_array,
                            APO_CROP_CONFIG)
 
 
@@ -249,21 +249,19 @@ for path, filename in zip(image_paths, filenames):
             annot_x = int(row['x'])
             annot_y = int(row['y'])
             annot_t = int(row['t'])
+            # We block larger regions if we could not match an annotation
+            window_size_no_match = 2*WINDOW_SIZE
+            num_block_no_match = 2*NUM_BLOCKED_FRAMES
 
-            # Block big windows if no match was found
-            half_window = WINDOW_SIZE
-
-            # Spatial indices (clamped to array bounds)
-            x_start = max(0, annot_x - half_window)
-            x_end = min(max_x, x_start + WINDOW_SIZE)  # Ensure window doesn't exceed array
-            y_start = max(0, annot_y - half_window)
-            y_end = min(max_y, y_start + WINDOW_SIZE)
-
-            # Temporal indices (clamped)
-            t_end = min(max_t, annot_t + NUM_BLOCKED_FRAMES//acquisition_freq)
-
-            if t_end > last_t:
-                apo_check_array[last_t:t_end, y_start:y_end, x_start:x_end] = 1
+            block_window_in_array(
+                apo_check_array,
+                annot_t,
+                annot_x,
+                annot_y,
+                window_size_no_match,     # big windows if annotation was not matched
+                num_block_no_match,
+                acquisition_freq
+            )
 
 
         is_correct_track = merged_df_long['track_id'] == current_track_id
@@ -280,7 +278,19 @@ for path, filename in zip(image_paths, filenames):
         last_y = int(last_row['y'])
         last_t = int(last_row['t'])
 
+        block_window_in_array(
+            apo_check_array,
+            last_t,
+            last_x,
+            last_y,
+            WINDOW_SIZE,
+            NUM_BLOCKED_FRAMES,
+            acquisition_freq
+        )
+
         half_window = WINDOW_SIZE // 2
+
+
 
         # Spatial indices (clamped to array bounds)
         x_start = max(0, last_x - half_window)

@@ -1,3 +1,5 @@
+import numpy as np
+
 def crop_window(img, center_x, center_y, window_size):
     # Check if number is even, add one if so
     # if window_size%2 == 0:
@@ -10,3 +12,32 @@ def crop_window(img, center_x, center_y, window_size):
     window = img[y_from:y_to, x_from:x_to]
 
     return window
+
+def block_window_in_array(array, t, x, y, window_size, num_blocked_frames, acquisition_freq):
+    """
+    Blocks a window in the given array around the specified coordinates.
+    
+    Args:
+        array: The 3D array to block in (t, y, x format)
+        t: Time index
+        x: X coordinate
+        y: Y coordinate
+        window_size: Size of the window
+        num_blocked_frames: Number of frames to block forward in time
+        acquisition_freq: Acquisition frequency for scaling time blocks
+    """
+    max_t, max_y, max_x = array.shape
+    half_window = window_size // 2
+    
+    # Spatial indices (clamped to array bounds)
+    x_start = max(0, x - half_window)
+    x_end = min(max_x, x_start + window_size)
+    y_start = max(0, y - half_window)
+    y_end = min(max_y, y_start + window_size)
+    
+    # Temporal indices (clamped)
+    t_end = min(max_t, t + num_blocked_frames // acquisition_freq)
+    
+    # Set the block to 1 if there's a valid time range
+    if t_end > t:
+        array[t:t_end, y_start:y_end, x_start:x_end] = 1
