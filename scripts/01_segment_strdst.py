@@ -40,6 +40,7 @@ from datetime import datetime
 # Third-party imports
 # Data handling
 import numpy as np
+import pandas as pd
 # Deep learning and segmentation
 from stardist.models import StarDist2D
 
@@ -63,7 +64,8 @@ SAVE_DATA = SEGMENTATION_CONFIG['SAVE_DATA']
 USE_GPU = SEGMENTATION_CONFIG['USE_GPU']
 
 MIN_NUC_SIZE = SEGMENTATION_CONFIG['MIN_NUC_SIZE']  # Removes objects < x
-
+MIN_NUC_SIZE_20x = SEGMENTATION_CONFIG['MIN_NUC_SIZE_20x']
+EXPERIMENT_INFO = SEGMENTATION_CONFIG['EXPERIMENT_INFO']
 
 # Logger Set Up
 logger = logging.getLogger(__name__)
@@ -111,6 +113,13 @@ if USE_GPU:
 model = StarDist2D.from_pretrained("2D_versatile_fluo")    # Load standard model to create GT
 axis_norm = (0, 1)    # for normalization
 
+# Load experiment info to choose correct config
+try:
+    experiments_list = pd.read_csv(EXPERIMENT_INFO, header=0)
+except FileNotFoundError as e:
+    logger.critical("Critical error: experiment list file not found: "
+                    f"{EXPERIMENT_INFO}. Aborting script.")
+    sys.exit(1)
 
 # Loop over all files in target directory (predict labels, track and crop windows for each)
 logger.info("Starting Segmentation.")
@@ -123,8 +132,21 @@ for path, filename in zip(image_paths, filenames):
     gt, details = run_segmentation(path, model, axis_norm)
     logger.info("\t\tSegmentation done.")
 
+    exp_name = filename.split('_')[0]
+    exp_row = experiments_list[experiments_list['Experiment'] == exp_name]
+
+    if exp_row.empty:
+        min_nuc_size = MIN_NUC_SIZE
+        logger.info("\t\tChose default MIN_NUC_SIZE (for 40x imgs)")
+    elif exp_row['Magnification'].values[0] == '20x':
+        min_nuc_size = MIN_NUC_SIZE_20x
+        logger.info("\t\tChose MIN_NUC_SIZE_20x")
+    else:
+        min_nuc_size = MIN_NUC_SIZE
+        logger.info("\t\tChose default MIN_NUC_SIZE (for 40x imgs)")
+
     # Remove small objects and create DF with segmentation info (object_id, t, x, y)
-    gt_filtered, summary_df = filter_segmentation(gt, details, MIN_NUC_SIZE)
+    gt_filtered, summary_df = filter_segmentation(gt, details, min_nuc_size)
 
     # Save data
     if SAVE_DATA:

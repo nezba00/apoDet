@@ -46,7 +46,8 @@ SEGMENTATION_CONFIG = {
     'SAVE_DATA': True,                              # Whether to save outputs
     'USE_GPU': True,                                # Enable GPU acceleration if available
     'MIN_NUC_SIZE': 200,                            # Minimum nuclear size to consider [pixels]
-    'MIN_NUC_SIZE_20x': 100
+    'MIN_NUC_SIZE_20x': 100,
+    'EXPERIMENT_INFO': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',  # Experiment metadata
 }
 
 # ---------------------------
