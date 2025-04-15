@@ -52,6 +52,7 @@ from preprocessing import (filter_segmentation, get_image_paths,
 IMG_DIR = SEGMENTATION_CONFIG['IMG_DIR']
 # Output
 MASK_DIR = SEGMENTATION_CONFIG['MASK_DIR']  # Stardist label predictions
+MASK_DIR_NO_FILT = SEGMENTATION_CONFIG['MASK_DIR_NO_FILT']
 DF_DIR = SEGMENTATION_CONFIG['DF_DIR']
 DETAILS_DIR = SEGMENTATION_CONFIG['DETAILS_DIR']
 LOG_DIR = SEGMENTATION_CONFIG['LOG_DIR']  # Folder for logs
@@ -98,7 +99,7 @@ num_files = len(filenames)
 logger.info(f"Detected {len(filenames)} files in specified directories.")
 
 # Create directories for saving if they do not exist
-output_dirs = [MASK_DIR, DF_DIR, DETAILS_DIR]
+output_dirs = [MASK_DIR, MASK_DIR_NO_FILT, DF_DIR, DETAILS_DIR]
 for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
@@ -129,6 +130,8 @@ for path, filename in zip(image_paths, filenames):
     if SAVE_DATA:
         # Save masks
         mask_path = os.path.join(MASK_DIR, f'{filename}.npz')
+        no_filt_path = os.path.join(MASK_DIR_NO_FILT, f'{filename}.npz')
+        np.savez_compressed(no_filt_path, gt=gt)
         np.savez_compressed(mask_path, gt=gt_filtered)
         logger.info(f"\t\tMask saved at: {mask_path}")
         # Save summary df (obj_id, t, x, y for every detected object)

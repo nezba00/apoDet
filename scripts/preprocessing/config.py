@@ -19,6 +19,7 @@ BASE_LOG_DIR = Path("./logs") / RUN_NAME
 # Global directories (common to several modules)
 IMG_DIR = Path("/mnt/imaging.data/PertzLab/apoDetection/TIFFs")
 MASK_DIR = BASE_DATA_DIR / "apo_masks"
+MASK_DIR_NO_FILT = BASE_DATA_DIR / 'apo_masks_no_filt'
 DF_DIR = BASE_DATA_DIR / "summary_dfs"
 DETAILS_DIR = BASE_DATA_DIR / "details"
 TRACKED_MASK_DIR = BASE_DATA_DIR / "tracked_masks"
@@ -38,12 +39,14 @@ LOG_DIR = BASE_LOG_DIR
 SEGMENTATION_CONFIG = {
     'IMG_DIR': IMG_DIR,                             # Input directory for images
     'MASK_DIR': MASK_DIR,             # Output: Segmentation masks
+    'MASK_DIR_NO_FILT': MASK_DIR_NO_FILT,
     'DF_DIR': DF_DIR,             # Output: Summary dataframes
     'DETAILS_DIR': DETAILS_DIR,            # Output: Detailed segmentation results
     'LOG_DIR': LOG_DIR,                            # Logging directory
     'SAVE_DATA': True,                              # Whether to save outputs
     'USE_GPU': True,                                # Enable GPU acceleration if available
     'MIN_NUC_SIZE': 200,                            # Minimum nuclear size to consider [pixels]
+    'MIN_NUC_SIZE_20x': 100
 }
 
 # ---------------------------
@@ -59,7 +62,9 @@ TRACKING_CONFIG = {
     'RUN_NAME': RUN_NAME,                             # Name identifier for this run
     'BT_CONFIG_FILE': "extras/cell_config.json",    # Config file for the BTrack algorithm
     'BT_CONFIG_20X': "/home/nbahou/myimaging/apoDet/scripts/extras/cell_config_20x.json",
+    'BT_CONFIG_20X_5t': '/home/nbahou/myimaging/apoDet/scripts/extras/cell_config_5_20x.json',
     'EPS_TRACK': 70,                                # Tracking radius in pixels
+    'EPS_TRACK_20x': 30,
     'TRK_MIN_LEN': 25,                             # Minimum track length in frames
     'LOG_DIR': LOG_DIR,
     'EXPERIMENT_INFO': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',  # Experiment metadata
@@ -99,6 +104,7 @@ APO_CROP_CONFIG = {
     'MAX_TRACKING_DURATION': 20,                    # Maximum tracking duration in minutes
     'FRAME_INTERVAL': 5,                            # Temporal resolution between frames (in minutes)
     'WINDOW_SIZE': 48,                              # Size of spatial crops (pixels)
+    'WINDOW_SIZE_20x': 32,
     'ECCENTRICITY_THR': 0.4,
     'SOLIDITY_THR': 0.925,
     'CROP_STD_THR': 1000,
