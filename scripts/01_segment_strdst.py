@@ -33,7 +33,7 @@ Outputs:
 # Standard library imports
 import logging
 import os
-import pickle
+import pickle   # for saving segmentation details (centroids)
 import sys
 from datetime import datetime
 
@@ -92,9 +92,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Load image paths in specified directory
+# Load image paths in specified parent directory
 logger.info("Starting Image Processing")
 image_paths = get_image_paths(os.path.join(IMG_DIR))
+# Extract filenames from absolute paths
 filenames = [os.path.splitext(os.path.basename(path))[0]
              for path in image_paths]
 num_files = len(filenames)
@@ -106,11 +107,11 @@ for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
 # Set up GT_mask prediction with stardist
-if USE_GPU:
+if USE_GPU:         # Code inside if statement only necessary if GPU is used
     import gputools
     from csbdeep.utils.tf import limit_gpu_memory
     limit_gpu_memory(None, allow_growth=True)
-model = StarDist2D.from_pretrained("2D_versatile_fluo")    # Load standard model to create GT
+model = StarDist2D.from_pretrained("2D_versatile_fluo")    # Load pretrained model
 axis_norm = (0, 1)    # for normalization
 
 # Load experiment info to choose correct config
@@ -127,14 +128,13 @@ for path, filename in zip(image_paths, filenames):
     logger.info(f"Processing {filename}")
 
     # Stardist nuclei segmentation
-    # Load and normalize image stack
     logger.info("\tStarting with Stardist segmentation.")
     gt, details = run_segmentation(path, model, axis_norm)
     logger.info("\t\tSegmentation done.")
 
+    # Choose correct MIN_NUC_SIZE to filter (objects smaller at smaller magnifications!)
     exp_name = filename.split('_')[0]
     exp_row = experiments_list[experiments_list['Experiment'] == exp_name]
-
     if exp_row.empty:
         min_nuc_size = MIN_NUC_SIZE
         logger.info("\t\tChose default MIN_NUC_SIZE (for 40x imgs)")
@@ -163,6 +163,7 @@ for path, filename in zip(image_paths, filenames):
         )
         logger.info(f"\t\tSummary-Df saved at: {os.path.join(DF_DIR, f'{filename}_pd_df.csv')}")
 
+        # Save Stardist details
         details_path = os.path.join(DETAILS_DIR, f'{filename}.pkl')
         with open(details_path, 'wb') as f:
             pickle.dump(details, f)

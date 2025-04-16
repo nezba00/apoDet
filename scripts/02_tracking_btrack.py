@@ -110,7 +110,6 @@ image_paths = get_image_paths(os.path.join(IMG_DIR))
 filenames = [os.path.splitext(os.path.basename(path))[0]
              for path in image_paths]
 logger.info(f"Detected {len(filenames)} files in specified directories.")
-# print(filenames)
 
 # Create directories for saving if they do not exist
 output_dirs = [MASK_DIR, DF_DIR, TRACK_DF_DIR, TRACKED_MASK_DIR]
@@ -136,19 +135,18 @@ for path, filename in zip(image_paths, filenames):
     with np.load(mask_path) as data:
         gt_filtered = data['gt']  # Access the saved array
 
+    # Replace outlier frames by zeroslike. Outliers show more than 20x MAD (median absolute deviation)
     gt_filtered, indices = remove_outlier_frames(gt_filtered)
     logger.info(f'{len(indices)} outlier frames replaced by frame with zeroes.')
 
+    # Load dfs from segmentation with obj_id, t, x, y
     df_path = os.path.join(DF_DIR, f'{filename}_pd_df.csv')
     strdst_df = pd.read_csv(df_path, header=0)
 
-    btrack_config_path, custom_settings = get_btrack_config_path(filename,
+    # Choose correct btrack config file depending on magnification and delta t
+    btrack_config_path, track_radius = get_btrack_config_path(filename,
                                                                  experiments_list)
     
-    if custom_settings:
-        track_radius = 30
-    else:
-        track_radius = EPS_TRACK
 
     # Run tracking with Btrack
     dfBTracks = run_tracking(gt_filtered, btrack_config_path, track_radius)
@@ -171,56 +169,44 @@ for path, filename in zip(image_paths, filenames):
     # Create a mask with btrack track_ids instead of stardists obj_ids
     logger.info("\tConverting Obj_IDs to Track_IDs in stardist masks.")
     tracked_masks = convert_obj_to_track_ids(gt_filtered, merged_df)
-
-    # Save masks
+    # Save newly created tracked masks
     mask_path = os.path.join(TRACKED_MASK_DIR, f'{filename}.npz')
     np.savez_compressed(mask_path, gt=tracked_masks)
     logger.info(f"\t\tMask saved at: {mask_path}")
 
+    # Create directory for track length histogram
+    output_dir = os.path.join(PLOT_DIR, RUN_NAME, "btrack_hists")
+    os.makedirs(output_dir, exist_ok=True)  # Create directory if it doesn't exist
 
-output_dir = os.path.join(PLOT_DIR, RUN_NAME)
-os.makedirs(output_dir, exist_ok=True)  # Create directory if it doesn't exist
+    # Count occurrences of each track_id to determine track lengths
+    track_lengths = merged_df["track_id"].value_counts()
 
-# Count occurrences of each track_id to determine track lengths
-track_lengths = merged_df["track_id"].value_counts()
+    # Plot histogram
+    plt.figure(figsize=(10, 6))
+    plt.hist(track_lengths, bins=20, edgecolor="black", alpha=0.7)
+    plt.xlabel("Track Length")
+    plt.ylabel("Frequency")
+    plt.title("Histogram of Track Lengths")
+    # Save plot
+    plot_filename = os.path.join(output_dir, f"{filename}_track_lengths.png")
+    plt.savefig(plot_filename)
 
-# Plot histogram
-plt.figure(figsize=(10, 6))
-plt.hist(track_lengths, bins=20, edgecolor="black", alpha=0.7)
+    plt.close()
 
-# Labels and title
-plt.xlabel("Track Length")
-plt.ylabel("Frequency")
-plt.title("Histogram of Track Lengths")
+    # Create similar plot but with tracks < TRK_MIN_LEN filtered out
+    track_sizes = merged_df.groupby("track_id")["track_id"].transform('size')
+    merged_df_long = merged_df[track_sizes >= TRK_MIN_LEN].copy()
+    # Count occurrences of each track_id to determine track lengths
+    track_lengths = merged_df_long["track_id"].value_counts()
 
-# Save the plot
-plot_filename = os.path.join(output_dir, "track_lengths_histogram.png")
-plt.savefig(plot_filename)
+    # Plot histogram
+    plt.figure(figsize=(10, 6))
+    plt.hist(track_lengths, bins=20, edgecolor="black", alpha=0.7)
+    plt.xlabel("Track Length")
+    plt.ylabel("Frequency")
+    plt.title("Histogram of Track Lengths")
+    # Save plot
+    plot_filename = os.path.join(output_dir, f"{filename}_track_lengths_long.png")
+    plt.savefig(plot_filename)
 
-# Close the plot to free up memory
-plt.close()
-
-track_sizes = merged_df.groupby("track_id")["track_id"].transform('size')
-merged_df_long = merged_df[track_sizes >= TRK_MIN_LEN].copy()
-
-# Count occurrences of each track_id to determine track lengths
-track_lengths = merged_df_long["track_id"].value_counts()
-
-# Plot histogram
-plt.figure(figsize=(10, 6))
-plt.hist(track_lengths, bins=20, edgecolor="black", alpha=0.7)
-
-# Labels and title
-plt.xlabel("Track Length")
-plt.ylabel("Frequency")
-plt.title("Histogram of Track Lengths")
-
-# Save the plot
-plot_filename = os.path.join(output_dir, "track_lengths_histogram_long.png")
-plt.savefig(plot_filename)
-
-# Optionally, display the plot
-plt.show()
-
-# Close the plot to free up memory
-plt.close()
+    plt.close()
