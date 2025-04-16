@@ -36,6 +36,7 @@ def match_annotations(apo_annotations, details, tracked_masks, gt_filtered):
     # Loop over each annotation
     for _, row in tqdm(apo_annotations.iterrows(), total=len(apo_annotations), desc="Processing Annotations"):
         t, x, y = int(row['t']), int(row['x']), int(row['y'])
+        t -= 1  # because of 0 indexing
         centroids = np.array(details[t]['points'])  # Convert list to NumPy array
         
         # Compute Euclidean distances
@@ -55,8 +56,12 @@ def match_annotations(apo_annotations, details, tracked_masks, gt_filtered):
             t_end = min(t + 3 + 1, tracked_masks.shape[0])
             previous_frames = tracked_masks[t_start:t_end, y, x]
             if previous_frames.size > 0:
-                counts = np.bincount(previous_frames)
-                match_id = np.argmax(counts)
+                non_zero_frames = previous_frames[previous_frames != 0]
+                if non_zero_frames.size > 0:
+                    counts = np.bincount(non_zero_frames)
+                    match_id = np.argmax(counts)
+                else:
+                    match_id = 0
             else:
                 match_id = 0
 
