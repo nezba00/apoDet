@@ -128,7 +128,11 @@ for path, filename in zip(image_paths, filenames):
     apo_file = os.path.join(APO_DIR, f'{filename}.csv')
     apo_annotations = pd.read_csv(apo_file,
                                   header=None,
-                                  names=['filename', 'x', 'y', 't'])
+                                  names=['filename', 'x', 'y', 't'],
+                                  on_bad_lines='skip')
+    
+    # Drop rows with missing values (or mistakes)
+    apo_annotations = apo_annotations.dropna()
 
     # Read details file from stardist (with centroids, etc.)
     details_path = os.path.join(DETAILS_DIR, f'{filename}.pkl')
