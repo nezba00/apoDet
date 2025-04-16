@@ -110,7 +110,7 @@ def get_btrack_config_path(filename, experiments_list):
     
     Returns:
         str: Path to the appropriate BTrack config file
-        bool: Whether special settings were applied
+        int: Search radius in px
     """
     # Extract experiment name from filename
     exp_name = filename.split('_')[0]  # This will give "ExpXX"
@@ -120,14 +120,18 @@ def get_btrack_config_path(filename, experiments_list):
     
     if exp_row.empty:
         logger.warning(f"\tNo matching experiment found for {exp_name}, using default config")
-        return TRACKING_CONFIG['BT_CONFIG_FILE'], False
+        return TRACKING_CONFIG['BT_CONFIG_FILE'], TRACKING_CONFIG['EPS_TRACK']
     
     # Check if this experiment needs the special config
     if (exp_row['Acquisition_frequency(min)'].values[0] == 1 and 
         exp_row['Magnification'].values[0] == '20x'):
-        logger.info(f"\tUsing 20x config for {filename} (matched experiment: {exp_name})")
-        return TRACKING_CONFIG['BT_CONFIG_20X'], True
+        logger.info(f"\tUsing 20x t1 config for {filename} (matched experiment: {exp_name})")
+        return TRACKING_CONFIG['BT_CONFIG_20X'], TRACKING_CONFIG['EPS_TRACK_20x']
+    elif (exp_row['Acquisition_frequency(min)'].values[0] == 5 and 
+        exp_row['Magnification'].values[0] == '20x'):
+        logger.info(f"\tUsing 20x t5 config for {filename} (matched experiment: {exp_name})")
+        return TRACKING_CONFIG['BT_CONFIG_20X_5t'], TRACKING_CONFIG['EPS_TRACK_20x']
     else:
         logger.info(f"\tUsing standard config for {filename} (matched experiment: {exp_name})")
-        return TRACKING_CONFIG['BT_CONFIG_FILE'], False
+        return TRACKING_CONFIG['BT_CONFIG_FILE'], TRACKING_CONFIG['EPS_TRACK']
 
