@@ -97,6 +97,7 @@ APO_CROP_CONFIG = {
     'TRACK_DF_DIR': TRACK_DF_DIR,              # Input tracking dataframes
     'CROPS_DIR': BASE_DATA_DIR / 'apo_crops',              # Output: Cropped image series for QC (.tif)
     'WINDOWS_DIR': BASE_DATA_DIR / 'windows',  # Output: Crops for machine learning (e.g., scDINO)
+    'WINDOWS_DIR_20X': BASE_DATA_DIR / 'windows_20x',
     'PLOT_DIR': PLOT_DIR,                           # Directory to save survival time histograms, etc.
     'RUN_NAME': RUN_NAME,                             # Run identifier for cropping
     'BAD_CROPS': BASE_DATA_DIR / 'bad_crops',
@@ -105,7 +106,7 @@ APO_CROP_CONFIG = {
     'MAX_TRACKING_DURATION': 20,                    # Maximum tracking duration in minutes
     'FRAME_INTERVAL': 5,                            # Temporal resolution between frames (in minutes)
     'WINDOW_SIZE': 48,                              # Size of spatial crops (pixels)
-    'WINDOW_SIZE_20x': 32,
+    'WINDOW_SIZE_20X': 32,
     'ECCENTRICITY_THR': 0.4,
     'SOLIDITY_THR': 0.925,
     'CROP_STD_THR': 1000,

@@ -72,6 +72,7 @@ TRACK_DF_DIR = APO_CROP_CONFIG['TRACK_DF_DIR']
 # Output
 CROPS_DIR = APO_CROP_CONFIG['CROPS_DIR']    # Directory with .tif files for QC
 WINDOWS_DIR = APO_CROP_CONFIG['WINDOWS_DIR']    # Directory with crops for scDINO
+WINDOWS_DIR_20X = APO_CROP_CONFIG['WINDOWS_DIR_20X']
 BAD_CROPS = APO_CROP_CONFIG['BAD_CROPS']
 FEATURES_DIR = APO_CROP_CONFIG['FEATURES_DIR']
 APO_CHECK_ARRAY_DIR = APO_CROP_CONFIG['APO_CHECK_ARRAY_DIR']
@@ -89,6 +90,7 @@ MAX_TRACKING_DURATION = APO_CROP_CONFIG['MAX_TRACKING_DURATION']    # In minutes
 FRAME_INTERVAL = APO_CROP_CONFIG['FRAME_INTERVAL']  # minutes between images
 
 WINDOW_SIZE = APO_CROP_CONFIG['WINDOW_SIZE']
+WINDOW_SIZE_20X = APO_CROP_CONFIG['WINDOW_SIZE_20X']
 
 ECCENTRICITY_THR = APO_CROP_CONFIG['ECCENTRICITY_THR']
 SOLIDITY_THR = APO_CROP_CONFIG['SOLIDITY_THR']
@@ -130,11 +132,15 @@ logging.getLogger('btrack').setLevel(logging.WARNING)
 logger.info("Starting Image Processing")
 image_paths = get_image_paths(os.path.join(IMG_DIR))
 filenames = [os.path.splitext(os.path.basename(path))[0]
-             for path in image_paths[:2]]
+             for path in image_paths]
 logger.info(f"Detected {len(filenames)} files in specified directories.")
 
 # Create directories for saving if they do not exist
-output_dirs = [CROPS_DIR, WINDOWS_DIR, BAD_CROPS, FEATURES_DIR, APO_CHECK_ARRAY_DIR]
+output_dirs = [
+    CROPS_DIR, WINDOWS_DIR, 
+    BAD_CROPS, FEATURES_DIR, 
+    APO_CHECK_ARRAY_DIR, WINDOWS_DIR_20X
+]
 for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
@@ -178,6 +184,23 @@ for path, filename in zip(image_paths, filenames):
                        "Annotations of apoptotic cells not found.")
         continue
 
+    exp_name = filename.split('_')[0]
+    exp_row = experiments_list[experiments_list['Experiment'] == exp_name]
+
+    if exp_row.empty:
+        window_size = WINDOW_SIZE
+        logger.info(
+            f"\t\tExperiment {exp_name} not found in experiment info. "
+            "Using default WINDOW_SIZE (for 40x imgs)"
+        )
+        magnification = '40x'   # Set to default settings 
+    else:
+        magnification = exp_row['Magnification'].values[0]
+        window_size = WINDOW_SIZE_20X if magnification == '20x' else WINDOW_SIZE
+        logger.info(
+            f"\t\tUsing {window_size} window size for {magnification} magnification"
+        )
+
     # Load mask with track_ids
     mask_path = os.path.join(TRACKED_MASK_DIR, f'{filename}.npz')
     loaded_data = np.load(mask_path)
@@ -198,7 +221,7 @@ for path, filename in zip(image_paths, filenames):
     step = FRAME_INTERVAL // acquisition_freq    # e.g. 5 // 1 = 5 -> 1 image every 5 frames
     num_frames = MAX_TRACKING_DURATION // acquisition_freq
     # Adds + 1 if even to have the annotated pixel centered in the window
-    target_size = WINDOW_SIZE # if WINDOW_SIZE%2 != 0 else WINDOW_SIZE + 1
+    target_size = window_size # if WINDOW_SIZE%2 != 0 else WINDOW_SIZE + 1
 
     logger.debug("\tTime Info:")
     logger.debug(f"\t\t File Interval: {acquisition_freq} min/image")
@@ -208,16 +231,22 @@ for path, filename in zip(image_paths, filenames):
 
     # Create directory for cropped windows
     os.makedirs(os.path.join(CROPS_DIR, filename), exist_ok=True)
-    os.makedirs(os.path.join(WINDOWS_DIR, 'apo'), exist_ok=True)
     os.makedirs(os.path.join(CROPS_DIR, f'no_apo_{filename}'), exist_ok=True)
-    os.makedirs(os.path.join(WINDOWS_DIR, 'no_apo'), exist_ok=True)
     os.makedirs(os.path.join(CROPS_DIR, f'random_{filename}'), exist_ok=True)
-    os.makedirs(os.path.join(WINDOWS_DIR, 'random'), exist_ok=True)
     os.makedirs(os.path.join(BAD_CROPS, f'no_apo_{filename}'), exist_ok=True)
+
+    # Create output directories based on magnification
+    if magnification == '20x':
+        window_dir = WINDOWS_DIR_20X
+    else:
+        window_dir = WINDOWS_DIR
+
+    os.makedirs(os.path.join(window_dir, 'apo'), exist_ok=True)
+    os.makedirs(os.path.join(window_dir, 'no_apo'), exist_ok=True)
+    os.makedirs(os.path.join(window_dir, 'random'), exist_ok=True)
 
     # Load images to extract windows
     imgs = load_image_stack(os.path.join(IMG_DIR, f'{filename}.tif'))
-    max_t, max_y, max_x = imgs.shape
 
     # Counter so we can sample same number of random tracks as apoptotic
     num_apo_crops = 0
@@ -250,7 +279,7 @@ for path, filename in zip(image_paths, filenames):
             annot_y = int(row['y'])
             annot_t = int(row['t'])
             # We block larger regions if we could not match an annotation
-            window_size_no_match = 2*WINDOW_SIZE
+            window_size_no_match = 2*window_size
             num_block_no_match = 2*NUM_BLOCKED_FRAMES
 
             block_window_in_array(
@@ -283,28 +312,10 @@ for path, filename in zip(image_paths, filenames):
             last_t,
             last_x,
             last_y,
-            WINDOW_SIZE,
+            window_size,
             NUM_BLOCKED_FRAMES,
             acquisition_freq
-        )
-
-        half_window = WINDOW_SIZE // 2
-
-
-
-        # Spatial indices (clamped to array bounds)
-        x_start = max(0, last_x - half_window)
-        x_end = min(max_x, x_start + WINDOW_SIZE)  # Ensure window doesn't exceed array
-        y_start = max(0, last_y - half_window)
-        y_end = min(max_y, y_start + WINDOW_SIZE)
-
-        # Temporal indices (clamped)
-        t_end = min(max_t, last_t + NUM_BLOCKED_FRAMES//acquisition_freq)
-
-        # Set the block to 1
-        if t_end > last_t:
-            apo_check_array[last_t:t_end, y_start:y_end, x_start:x_end] = 1
-        
+        )        
 
         # Count track length after manual apoptosis annotation (for histogram later)
         num_entries = single_cell_df.shape[0]
@@ -323,7 +334,7 @@ for path, filename in zip(image_paths, filenames):
             window = crop_window(imgs[int(sc_row['t'])],
                                  int(sc_row['x']),
                                  int(sc_row['y']),
-                                 WINDOW_SIZE)
+                                 window_size)
             if window.shape == (target_size, target_size):
                 windows.append(window)
             else:
@@ -354,7 +365,7 @@ for path, filename in zip(image_paths, filenames):
                 )
                 tiff.imwrite(
                     os.path.join(
-                        WINDOWS_DIR,
+                        window_dir,
                         'apo',
                         f'apo_{filename}_{i}.tif'
                     ),
@@ -364,7 +375,7 @@ for path, filename in zip(image_paths, filenames):
             else:
                 logger.warning(f'\t\tAt least one of the images has the wrong '
                                'size after cropping and could not be used. '
-                               'Length = {len(windows)}. Pos = {row["x"]}, '
+                               f'Length = {len(windows)}. Pos = {row["x"]}, '
                                f'{row["y"]}.')
     logger.info(f"\t\tValid crops of apo cells found for \
                 {num_apo_crops}/{len(apo_annotations)}")
@@ -390,6 +401,7 @@ for path, filename in zip(image_paths, filenames):
     for i, track_id in tqdm(enumerate(unique_track_ids),
                             total=len(unique_track_ids),
                             desc="Cropping non-apo Windows"):
+        track_id = int(track_id)
         single_cell_df = long_no_apo_df.loc[
             long_no_apo_df['track_id'] == track_id
             ]
@@ -403,9 +415,9 @@ for path, filename in zip(image_paths, filenames):
         for _, sc_row in single_cell_df.iterrows():
             window = crop_window(imgs[int(sc_row['t'])],
                                  int(sc_row['x']), int(sc_row['y']),
-                                 WINDOW_SIZE)
-            mask_window = crop_window(tracked_masks[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), WINDOW_SIZE)  ###
-            apo_window = crop_window(apo_check_array[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), WINDOW_SIZE)
+                                 window_size)
+            mask_window = crop_window(tracked_masks[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), window_size)  ###
+            apo_window = crop_window(apo_check_array[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), window_size)
             
             mask_window = mask_window.astype(int)
             mask_window[mask_window != track_id] = 0
@@ -473,15 +485,13 @@ for path, filename in zip(image_paths, filenames):
                     )
                     tiff.imwrite(
                         os.path.join(
-                            WINDOWS_DIR,
+                            window_dir,
                             'no_apo',
                             f'no_apo_{filename}_{i}.tif'
                         ),
                         windows[::step].transpose(1, 2, 0)
                     )
                     num_healthy_crops += 1
-
-
         else:
             logger.debug('\t\tAt least one of the images has the wrong size. '
                          f'Length = {len(windows)}. '
@@ -500,23 +510,23 @@ for path, filename in zip(image_paths, filenames):
 
     iter_count = 0
     crop_count = 0
-    while (crop_count < num_random_tracks) and (iter_count <= 100):
+    while (crop_count < num_random_tracks) and (iter_count <= 2000):
         start_t = np.random.randint(0, len(imgs) - num_frames)
 
         # Randomly generate valid (x, y) coordinates for the crop center
-        random_x = np.random.randint(WINDOW_SIZE//2, img_width - WINDOW_SIZE//2)
-        random_y = np.random.randint(WINDOW_SIZE//2,img_height - WINDOW_SIZE//2)
+        random_x = np.random.randint(window_size//2, img_width - window_size//2)
+        random_y = np.random.randint(window_size//2,img_height - window_size//2)
 
         windows = []
         # Extract a window for each frame in the track duration
         for t in range(start_t, start_t + num_frames + 1, step):
-            window = crop_window(imgs[t], random_x, random_y, WINDOW_SIZE)
+            window = crop_window(imgs[t], random_x, random_y, window_size)
             track_id_mask_crop = crop_window(tracked_masks[t],
                                              random_x, random_y,
-                                             WINDOW_SIZE)
+                                             window_size)
             apo_check_array_crop = crop_window(apo_check_array[t],
                                                random_x, random_y,
-                                               WINDOW_SIZE)
+                                               window_size)
             present_track_ids = track_id_mask_crop.flatten().tolist()
 
             # Continue here
@@ -557,7 +567,7 @@ for path, filename in zip(image_paths, filenames):
             )
             tiff.imwrite(
                 os.path.join(
-                    WINDOWS_DIR,
+                    window_dir,
                     'random',
                     f'random_{filename}_{crop_count}.tif'
                 ),
