@@ -45,7 +45,8 @@ import pandas as pd
 from stardist.models import StarDist2D
 
 from preprocessing import (filter_segmentation, get_image_paths,
-                           run_segmentation, SEGMENTATION_CONFIG)
+                           run_segmentation, get_experiment_info,
+                           SEGMENTATION_CONFIG)
 
 # Variables
 # Directory Paths
@@ -133,12 +134,11 @@ for path, filename in zip(image_paths, filenames):
     logger.info("\t\tSegmentation done.")
 
     # Choose correct MIN_NUC_SIZE to filter (objects smaller at smaller magnifications!)
-    exp_name = filename.split('_')[0]
-    exp_row = experiments_list[experiments_list['Experiment'] == exp_name]
-    if exp_row.empty:
+    exp_info = get_experiment_info(filename, experiments_list)
+    if not exp_info['found']:
         min_nuc_size = MIN_NUC_SIZE
         logger.info("\t\tChose default MIN_NUC_SIZE (for 40x imgs)")
-    elif exp_row['Magnification'].values[0] == '20x':
+    elif exp_info['magnification'] == '20x':
         min_nuc_size = MIN_NUC_SIZE_20x
         logger.info("\t\tChose MIN_NUC_SIZE_20x")
     else:
