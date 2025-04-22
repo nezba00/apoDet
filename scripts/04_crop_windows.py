@@ -57,7 +57,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from preprocessing import (check_temporal_compatibility, crop_window,
                            get_image_paths, load_image_stack, block_window_in_array,
-                           APO_CROP_CONFIG)
+                           get_experiment_info, APO_CROP_CONFIG)
 
 
 # Variables
@@ -166,46 +166,6 @@ logger.info("Starting to process files.")
 for path, filename in zip(image_paths, filenames):
     logger.info(f"Processing {filename}")
 
-    try:
-        merge_df_path = os.path.join(TRACK_DF_DIR, f"{filename}.csv")
-        merged_df = pd.read_csv(merge_df_path)
-        track_sizes= merged_df.groupby("track_id")["track_id"].transform('size')
-        merged_df_long = merged_df[track_sizes >= TRK_MIN_LEN].copy()
-    except Exception as e:
-        logger.warning(f"\tSkipping {filename} due to: {str(e)}. "
-                       "DF with track_ids and centroids not found.")
-        continue
-
-    try:
-        csv_path = os.path.join(CSV_DIR, f'{filename}.csv')
-        apo_annotations = pd.read_csv(csv_path)
-    except Exception as e:
-        logger.warning(f"\tSkipping {filename} due to: {str(e)}. "
-                       "Annotations of apoptotic cells not found.")
-        continue
-
-    exp_name = filename.split('_')[0]
-    exp_row = experiments_list[experiments_list['Experiment'] == exp_name]
-
-    if exp_row.empty:
-        window_size = WINDOW_SIZE
-        logger.info(
-            f"\t\tExperiment {exp_name} not found in experiment info. "
-            "Using default WINDOW_SIZE (for 40x imgs)"
-        )
-        magnification = '40x'   # Set to default settings 
-    else:
-        magnification = exp_row['Magnification'].values[0]
-        window_size = WINDOW_SIZE_20X if magnification == '20x' else WINDOW_SIZE
-        logger.info(
-            f"\t\tUsing {window_size} window size for {magnification} magnification"
-        )
-
-    # Load mask with track_ids
-    mask_path = os.path.join(TRACKED_MASK_DIR, f'{filename}.npz')
-    loaded_data = np.load(mask_path)
-    tracked_masks = loaded_data['gt']
-
     is_valid, result = check_temporal_compatibility(filename,
                                                     experiments_list,
                                                     FRAME_INTERVAL)
@@ -221,7 +181,50 @@ for path, filename in zip(image_paths, filenames):
     step = FRAME_INTERVAL // acquisition_freq    # e.g. 5 // 1 = 5 -> 1 image every 5 frames
     num_frames = MAX_TRACKING_DURATION // acquisition_freq
     # Adds + 1 if even to have the annotated pixel centered in the window
+
+    try:
+        merge_df_path = os.path.join(TRACK_DF_DIR, f"{filename}.csv")
+        merged_df = pd.read_csv(merge_df_path)
+        track_sizes= merged_df.groupby("track_id")["track_id"].transform('size')
+        required_frames = (FRAME_INTERVAL // acquisition_freq) * (num_timepoints + 1)
+        merged_df_long = merged_df[track_sizes >= required_frames].copy()
+        logger.info(f"\t\tUsing minimum track length of {required_frames} frames for acquisition frequency {acquisition_freq}")
+    except Exception as e:
+        logger.warning(f"\tSkipping {filename} due to: {str(e)}. "
+                       "DF with track_ids and centroids not found.")
+        continue
+
+    try:
+        csv_path = os.path.join(CSV_DIR, f'{filename}.csv')
+        apo_annotations = pd.read_csv(csv_path)
+    except Exception as e:
+        logger.warning(f"\tSkipping {filename} due to: {str(e)}. "
+                       "Annotations of apoptotic cells not found.")
+        continue
+
+    
+    exp_info = get_experiment_info(filename, experiments_list)
+    if not exp_info['found']:
+        window_size = WINDOW_SIZE
+        logger.info(
+            f"\t\tExperiment {exp_info['exp_name']} not found in experiment info. "
+            "Using default WINDOW_SIZE (for 40x imgs)"
+        )
+        magnification = '40x'   # Set to default settings
+    else:
+        magnification = exp_info['magnification']
+        window_size = WINDOW_SIZE_20X if magnification == '20x' else WINDOW_SIZE
+        logger.info(
+            f"\t\tUsing {window_size} window size for {magnification} magnification"
+        )
+
     target_size = window_size # if WINDOW_SIZE%2 != 0 else WINDOW_SIZE + 1
+
+    # Load mask with track_ids
+    mask_path = os.path.join(TRACKED_MASK_DIR, f'{filename}.npz')
+    loaded_data = np.load(mask_path)
+    tracked_masks = loaded_data['gt']
+
 
     logger.debug("\tTime Info:")
     logger.debug(f"\t\t File Interval: {acquisition_freq} min/image")
@@ -250,6 +253,10 @@ for path, filename in zip(image_paths, filenames):
 
     # Counter so we can sample same number of random tracks as apoptotic
     num_apo_crops = 0
+    num_no_match = 0
+    num_blocked = 0
+    num_wrong_size = 0
+    num_track_too_short = 0
 
     # Initialize column apoptotic with zeros
     merged_df_long['apoptotic'] = 0
@@ -291,17 +298,26 @@ for path, filename in zip(image_paths, filenames):
                 num_block_no_match,
                 acquisition_freq
             )
-
+            logger.debug("\t\tSkipping annotation, no match found.")
+            num_no_match += 1
+            continue
 
         is_correct_track = merged_df_long['track_id'] == current_track_id
         is_valid_time = merged_df_long['t'] >= current_t
         single_cell_df = merged_df_long.loc[is_correct_track & is_valid_time]
-        if len(single_cell_df) < num_frames + 1:
-            logger.warning(f"\t\tSkipping current track: {current_track_id}. "
-                           f"Reason: Track lost too quickly after anno. "
-                           f"len = {len(single_cell_df)}")
+        if single_cell_df.empty:
+            logger.warning(
+                f"Track: {current_track_id} not found in csv."
+            )
             continue
 
+        # Count track length after manual apoptosis annotation (for histogram later)
+        num_entries = single_cell_df.shape[0]
+        survival_times.append(num_entries)
+
+        # Mark cells as apoptotic in dataframe with all cells
+        merged_df_long.loc[is_correct_track & is_valid_time, 'apoptotic'] = 1
+        # Block window in apo_check_array, now for cells with tracks
         last_row = single_cell_df.iloc[-1]
         last_x = int(last_row['x'])
         last_y = int(last_row['y'])
@@ -315,16 +331,14 @@ for path, filename in zip(image_paths, filenames):
             window_size,
             NUM_BLOCKED_FRAMES,
             acquisition_freq
-        )        
+        )    
 
-        # Count track length after manual apoptosis annotation (for histogram later)
-        num_entries = single_cell_df.shape[0]
-        survival_times.append(num_entries)
-
-        # merged_df_long.loc[single_cell_df.index, 'apoptotic'] = 1
-        is_correct_track = merged_df_long['track_id'] == current_track_id
-        is_valid_time = merged_df_long['t'] >= current_t
-        merged_df_long.loc[is_correct_track & is_valid_time, 'apoptotic'] = 1
+        if len(single_cell_df) < num_frames + 1:
+            logger.debug(f"\t\tSkipping current track: {current_track_id}. "
+                           f"Reason: Track lost too quickly after anno. "
+                           f"len = {len(single_cell_df)}")
+            num_track_too_short += 1
+            continue
 
         upper_t_limit = current_t + num_frames + step
         single_cell_df = single_cell_df.loc[single_cell_df['t'] < upper_t_limit]
@@ -344,18 +358,21 @@ for path, filename in zip(image_paths, filenames):
         chosen_offset = None
         for offset in range(step):
             sub_windows = windows[offset::step]
-            if all(x is not None for x in sub_windows):
+            all_frames_valid = all(x is not None for x in sub_windows)
+            enough_frames = (len(sub_windows) == (num_frames // step) + 1)
+            if all_frames_valid and enough_frames:
                 chosen_offset = offset
                 break  # Stop as soon as a valid sequence is found
 
         if chosen_offset is None:
-            logger.warning("\t\tNo valid start point for a sequence "
-                           "with correct intervals found.")
+            logger.debug("\t\tAt least one of the windows does not have "
+                           f"the correct size.")
+            num_wrong_size += 1
         else:
             sub_windows = windows[chosen_offset::step]
             sub_windows = np.asarray(sub_windows)
-            if len(sub_windows) == (MAX_TRACKING_DURATION // step) + 1:
-                tiff.imwrite(
+            if len(sub_windows) == (num_frames // step) + 1:
+                tiff.imwrite(                    
                     os.path.join(
                         CROPS_DIR,
                         filename,
@@ -377,8 +394,12 @@ for path, filename in zip(image_paths, filenames):
                                'size after cropping and could not be used. '
                                f'Length = {len(windows)}. Pos = {row["x"]}, '
                                f'{row["y"]}.')
-    logger.info(f"\t\tValid crops of apo cells found for \
-                {num_apo_crops}/{len(apo_annotations)}")
+    logger.info(f"\t\tValid crops of apo cells found for "
+                f"{num_apo_crops}/{len(apo_annotations)}")
+    logger.info(f"\t\tNum annotations with no match: {num_no_match}")
+    logger.info(f"\t\tNum wrong size after cropping: {num_wrong_size}")
+    logger.info(f"\t\tNum tracks too short: {num_track_too_short}")
+    
     
     tiff.imwrite(
         os.path.join(
@@ -397,6 +418,10 @@ for path, filename in zip(image_paths, filenames):
 
     num_healthy_crops = 0
     rejected_windows = 0
+    num_blocked = 0
+    num_wrong_size = 0
+    num_track_too_short = 0
+    num_filtered = 0
 
     for i, track_id in tqdm(enumerate(unique_track_ids),
                             total=len(unique_track_ids),
@@ -410,6 +435,13 @@ for path, filename in zip(image_paths, filenames):
         single_cell_df = single_cell_df.loc[
             single_cell_df['t'] <= start_t + num_frames
             ]
+        
+        if len(single_cell_df) < (num_frames + 1):
+            logger.debug("\t\tSkipping current object, track too short.")
+            num_track_too_short += 1
+            rejected_windows += 1
+            continue
+
         windows = []
         mask_windows = []
         for _, sc_row in single_cell_df.iterrows():
@@ -428,14 +460,24 @@ for path, filename in zip(image_paths, filenames):
             if is_window_valid:
                 windows.append(window)
                 mask_windows.append(mask_window)
-            else:
+            elif is_blocked:
+                logger.debug("\t\tCrop blocked because of apoptotic event closeby")
+                num_blocked += 1
                 rejected_windows += 1
-                logger.warning(
+                break
+            else:
+                num_wrong_size += 1
+                rejected_windows += 1
+                logger.debug(
                     f"\t\tRejected window at (t={int(sc_row['t'])}, x={int(sc_row['x'])}, y={int(sc_row['y'])}): "
                     f"Blocked={is_blocked}, Shape={window.shape}"
                 )
+                break
+        
+        if len(windows) < num_frames + 1:
+            continue
 
-        if len(windows) == (MAX_TRACKING_DURATION) + 1:
+        if len(windows) == (num_frames) + 1:
             current_features = []
             for mask, img in zip(mask_windows, windows):    ###
                 props = measure.regionprops_table(mask, img, properties=['label', 'eccentricity',
@@ -474,6 +516,7 @@ for path, filename in zip(image_paths, filenames):
                     mean_solidity < SOLIDITY_THR)):
                     tiff.imwrite(os.path.join(BAD_CROPS, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows[::step].transpose(1, 2, 0))
                     rejected_windows += 1
+                    num_filtered += 1
                 else:
                     tiff.imwrite(
                         os.path.join(
@@ -493,13 +536,19 @@ for path, filename in zip(image_paths, filenames):
                     )
                     num_healthy_crops += 1
         else:
-            logger.debug('\t\tAt least one of the images has the wrong size. '
+            logger.warning('\t\tAt least one of the images has the wrong size. '
                          f'Length = {len(windows)}. '
                          f'Pos = {sc_row["x"]}, {sc_row["y"]}.')
     logger.info(f"\t\tFound {num_healthy_crops} valid crops of healthy cells.")
     if rejected_windows > 0:
-        logger.warning(f"\t\t{rejected_windows} windows were rejected "
-                       "due to incorrect size.")
+        logger.info(f"\t\t\t{rejected_windows} crops were rejected in total.")
+        logger.info(f"\t\t\t{num_blocked} windows were blocked because of close "
+                     "apoptotic events.")
+        logger.info(f"\t\t\t{num_wrong_size} crops had at least one window with "
+                     "the wrong size.")
+        logger.info(f"\t\t\t{num_track_too_short} tracks were too short.")
+        logger.info(f"\t\t\t{num_filtered} crops were filtered out in qc.")
+
 
     # Gather random crops
     logger.info(f'\tStarting cropping for {num_random_tracks} random spots.')
