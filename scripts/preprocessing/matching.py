@@ -8,7 +8,7 @@ import numpy as np
 
 
 
-def match_annotations(apo_annotations, details, tracked_masks, gt_filtered):
+def match_annotations(apo_annotations, details, tracked_masks, gt_filtered, dt_annots):
     """
     Match manual annotations with stardist detections.
     
@@ -17,6 +17,7 @@ def match_annotations(apo_annotations, details, tracked_masks, gt_filtered):
         details (dict or list): Details loaded from the stardist output, e.g., centroids.
         tracked_masks (ndarray): The mask array with btrack track IDs.
         gt_filtered (ndarray): The filtered segmentation array.
+        dt_annots (int): Manual annotations time resolution
         
     Returns:
         DataFrame: The apo_annotations DataFrame updated with matching information.
@@ -36,6 +37,7 @@ def match_annotations(apo_annotations, details, tracked_masks, gt_filtered):
     # Loop over each annotation
     for _, row in tqdm(apo_annotations.iterrows(), total=len(apo_annotations), desc="Processing Annotations"):
         t, x, y = int(row['t']), int(row['x']), int(row['y'])
+        t *= dt_annots
         t -= 1  # because of 0 indexing
         centroids = np.array(details[t]['points'])  # Convert list to NumPy array
         
