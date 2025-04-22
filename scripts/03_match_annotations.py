@@ -49,7 +49,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Utilities
-from preprocessing import get_image_paths, match_annotations, APO_MATCH_CONFIG
+from preprocessing import (get_image_paths, match_annotations, APO_MATCH_CONFIG,
+                           get_experiment_info)
 
 
 # Variables
@@ -60,6 +61,7 @@ APO_DIR = APO_MATCH_CONFIG['APO_DIR']
 DETAILS_DIR = APO_MATCH_CONFIG['DETAILS_DIR']
 MASK_DIR = APO_MATCH_CONFIG['MASK_DIR'] # Stardist label predictions    
 TRACKED_MASK_DIR = APO_MATCH_CONFIG['TRACKED_MASK_DIR']
+EXPERIMENT_INFO = APO_MATCH_CONFIG['EXPERIMENT_INFO']
 # Output
 CSV_DIR = APO_MATCH_CONFIG['CSV_DIR']   # File with manual + stardist centroids
 
@@ -104,6 +106,14 @@ filenames = [os.path.splitext(os.path.basename(path))[0]
              for path in image_paths]
 logger.info(f"Detected {len(filenames)} files in specified directories.")
 
+# Load Experiment info
+try:
+    experiments_list = pd.read_csv(EXPERIMENT_INFO, header=0)
+except FileNotFoundError as e:
+    logger.critical("Critical error: experiment list file not found: "
+                    f"{EXPERIMENT_INFO}. Aborting script.")
+    sys.exit(1)
+
 # Create directories for saving if they do not exist
 output_dirs = [CSV_DIR]
 for path in output_dirs:
@@ -131,6 +141,14 @@ for path, filename in zip(image_paths, filenames):
                                   names=['filename', 'x', 'y', 't'],
                                   on_bad_lines='skip')
     
+    exp_info = get_experiment_info(filename, experiments_list)
+    if not exp_info['found']:
+        multiplier = 1
+    else:
+        dt_acq = int(exp_info['acquisition_freq'])
+        dt_apo_annots = int(exp_info['apo_annotation_freq'])
+        multiplier = dt_apo_annots//dt_acq
+    
     # Drop rows with missing values (or mistakes)
     apo_annotations = apo_annotations.dropna()
 
@@ -152,7 +170,8 @@ for path, filename in zip(image_paths, filenames):
     apo_annotations, metrics = match_annotations(apo_annotations,
                                                  details,
                                                  tracked_masks,
-                                                 gt_filtered)
+                                                 gt_filtered,
+                                                 multiplier)
 
     num_matches = metrics['num_matches']
     num_mismatches = metrics['num_mismatches']
