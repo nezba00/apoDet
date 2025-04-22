@@ -10,7 +10,7 @@ It consolidates settings for:
 from pathlib import Path
 
 # Global settings
-RUN_NAME = "dataset1"
+RUN_NAME = "dataset2"
 
 # Base directories
 BASE_DATA_DIR = Path("../data") / RUN_NAME
@@ -84,6 +84,7 @@ APO_MATCH_CONFIG = {
     'PLOT_DIR': PLOT_DIR,                           # Directory to save distance histograms
     'RUN_NAME': RUN_NAME,                          # Run identifier for matching evaluation
     'LOG_DIR':  LOG_DIR,
+    'EXPERIMENT_INFO': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',
 }
 
 # ---------------------------
@@ -107,10 +108,10 @@ APO_CROP_CONFIG = {
     'FRAME_INTERVAL': 5,                            # Temporal resolution between frames (in minutes)
     'WINDOW_SIZE': 48,                              # Size of spatial crops (pixels)
     'WINDOW_SIZE_20X': 32,
-    'ECCENTRICITY_THR': 0.4,
+    'ECCENTRICITY_THR': 0.35,
     'SOLIDITY_THR': 0.925,
-    'CROP_STD_THR': 1000,
-    'CROP_MEAN_INT_THR': 3000,
+    'CROP_STD_THR': 1700,
+    'CROP_MEAN_INT_THR': 6500,
     'LOG_DIR': LOG_DIR,
     'NUM_BLOCKED_FRAMES': 50,
     'APO_CHECK_ARRAY_DIR': BASE_DATA_DIR / "apo_check_arrays",
