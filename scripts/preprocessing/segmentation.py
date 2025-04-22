@@ -9,7 +9,7 @@ import logging
 
 from .io_utils import load_image_stack
 
-
+logger = logging.getLogger(__name__)
 
 def run_segmentation(path, model, axis_norm):
     h2b_imgs = load_image_stack(path)
@@ -25,7 +25,7 @@ def run_segmentation(path, model, axis_norm):
     return gt, details
 
 def filter_segmentation(gt, details, min_size):
-    logging.info("\tRemoving objects smaller than {MIN_NUC_SIZE}.")
+    logger.info(f"\tRemoving objects smaller than {min_size}.")
     num_frames = gt.shape[0]
     gt_filtered = np.zeros_like(gt, dtype=np.uint16)
     df_list = []
