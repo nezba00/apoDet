@@ -738,10 +738,10 @@ features_df = pd.DataFrame(all_features)
 features_df.to_csv(os.path.join(FEATURES_DIR, "features.csv"), header=True)
 
 # Apply to all features with your cutoffs
-plot_feature(features_df['eccentricity'], 'eccentricity', 0.4, xlim=(0,1),comparison='<', output_dir=output_dir)
-plot_feature(features_df['intensity_std'], 'intensity_std', 1000, xlim=(0,3000), comparison='>', output_dir=output_dir)
-plot_feature(features_df['solidity'], 'solidity', 0.925, xlim=(0.8,1), comparison='<', output_dir=output_dir)
-plot_feature(features_df['intensity_mean'], 'intensity_mean', 3000, xlim=(0, 5500), comparison='>', output_dir=output_dir)
+plot_feature(features_df['eccentricity'], 'eccentricity', ECCENTRICITY_THR, xlim=(0,1),comparison='<', output_dir=output_dir)
+plot_feature(features_df['intensity_std'], 'intensity_std', CROP_STD_THR, xlim=(0,3000), comparison='>', output_dir=output_dir)
+plot_feature(features_df['solidity'], 'solidity', SOLIDITY_THR, xlim=(0.8,1), comparison='<', output_dir=output_dir)
+plot_feature(features_df['intensity_mean'], 'intensity_mean', CROP_MEAN_INT_THR, xlim=(0, 5500), comparison='>', output_dir=output_dir)
 
 # Survival times plot (from your example)
 plt.figure(figsize=(10, 6))
