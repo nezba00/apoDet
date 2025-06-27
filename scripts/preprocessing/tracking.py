@@ -10,6 +10,31 @@ from .config import TRACKING_CONFIG
 logger = logging.getLogger(__name__)
 
 def remove_outlier_frames(label_stack, thr_multiplier = 20):
+    """
+    Removes temporally isolated segmentation-mask frames that are statistical outliers.
+
+    Identifies and zeroes out "glitchy" frames in a time-series of segmentation
+    masks (e.g., video or volumetric slices) by comparing each frame's
+    sum-of-absolute-differences (SAD) to its nearest neighbor against a
+    threshold derived from the median absolute deviation (MAD) of all SADs.
+
+    Parameters
+    ----------
+    label_stack : np.ndarray
+        A 3D array (T, H, W) or (T, H, W, C) containing integer labels per frame.
+        Zero is background, non-zero is foreground.
+    thr_multiplier : float, optional
+        Multiplier for the MAD to define the outlier threshold.
+        Frames with SAD to neighbors exceeding `median(SADs) + thr_multiplier * MAD(SADs)`
+        are zeroed out. Defaults to 20.0.
+
+    Returns
+    -------
+    cleaned_stack : np.ndarray
+        A copy of 'label_stack' with detected outlier frames replaced by all zeros.
+    outlier_indices : np.ndarray
+        1D integer array listing the indices of frames identified as outliers.
+    """
     bin_imgs = np.copy(label_stack)
     bin_imgs[label_stack != 0] = 1
 
@@ -49,6 +74,32 @@ def remove_outlier_frames(label_stack, thr_multiplier = 20):
     return cleaned_stack, outlier_indices
 
 def run_tracking(gt_filtered, bt_config_file, track_radius):
+    """
+    Performs object tracking on segmented data using the btrack library.
+
+    Processes time-series segmentation data, configures a Bayesian tracker,
+    and returns the resulting object tracks as a pandas DataFrame.
+
+    Parameters
+    ----------
+    gt_filtered : np.ndarray
+        3D NumPy array (num_frames, height, width) of segmented objects.
+    bt_config_file : str or PathLike
+        Path to the btrack configuration file (e.g., JSON).
+    track_radius : float
+        Maximum search radius (pixels) for linking objects between frames.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with tracked object data: 'track_id', 't', 'x', 'y'.
+        Includes 'obj_id' (original object ID) if 'class_id' is
+        included in the `to_dict` call during conversion.
+
+    Notes
+    -----
+    - Assumes 2D + time input; adjust `tracker.volume` for 3D + time.
+    """
     logger.info("\tStarting tracking")
     _, fovY, fovX = gt_filtered.shape
     btObj = btrack.utils.segmentation_to_objects(gt_filtered, properties=("area",), assign_class_ID=True)
@@ -72,14 +123,28 @@ def run_tracking(gt_filtered, bt_config_file, track_radius):
 
 def convert_obj_to_track_ids(gt_filtered, merged_df):
     """
-    Converts object IDs to track IDs in Stardist masks using tracking data.
+    Replaces segmentation object IDs with persistent track IDs in masks.
 
-    Parameters:
-        gt_filtered (np.ndarray): The 3D array (time, height, width) of segmentation masks.
-        merged_df (pd.DataFrame): DataFrame containing tracking information with 'obj_id', 'track_id', and 't'.
+    Iterates through time frames of segmentation masks and uses tracking
+    information to assign a consistent `track_id` to each segmented object
+    across frames, enabling visualization and analysis of trajectories.
 
-    Returns:
-        np.ndarray: New 3D mask where obj_ids are replaced with track_ids.
+    Parameters
+    ----------
+    gt_filtered : np.ndarray
+        3D NumPy array (time, height, width) of segmentation masks.
+        Non-zero pixels within a frame correspond to objects with unique
+        integer `obj_id`s.
+    merged_df : pd.DataFrame
+        DataFrame with tracking results. Must contain 't', 'obj_id', and
+        'track_id' columns.
+
+    Returns
+    -------
+    np.ndarray
+        New 3D NumPy array of the same shape as `gt_filtered`, where
+        original `obj_id`s are replaced by their corresponding `track_id`s.
+        Background (zero) pixels remain zero.
     """
     
     tracked_masks = np.zeros_like(gt_filtered)
@@ -102,15 +167,28 @@ def convert_obj_to_track_ids(gt_filtered, merged_df):
 
 def get_btrack_config_path(filename, experiments_list):
     """
-    Determine which BTrack config file to use based on experiment parameters.
-    
-    Parameters:
-        filename (str): The filename being processed (format: ExpXX_SiteXX)
-        experiments_list (pd.DataFrame): DataFrame with experiment parameters
-    
-    Returns:
-        str: Path to the appropriate BTrack config file
-        int: Search radius in px
+    Determines the appropriate btrack configuration file and search radius.
+
+    Selects a btrack configuration file and corresponding search radius based
+    on experiment parameters (acquisition frequency and magnification) found
+    in `experiments_list` for a given `filename`. Uses default settings if
+    no specific match is found.
+
+    Parameters
+    ----------
+    filename : str
+        The filename being processed (e.g., "ExpXX_SiteXX"), used to extract
+        the experiment identifier.
+    experiments_list : pd.DataFrame
+        DataFrame containing experiment parameters. Expected to have 'Experiment',
+        'Acquisition_frequency(min)', and 'Magnification' columns.
+
+    Returns
+    -------
+    str
+        Path to the appropriate btrack configuration file.
+    int
+        Search radius in pixels for tracking.
     """
     # Extract experiment name from filename
     exp_name = filename.split('_')[0]  # This will give "ExpXX"

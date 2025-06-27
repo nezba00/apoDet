@@ -1,6 +1,28 @@
 import numpy as np
 
 def crop_window(img, center_x, center_y, window_size):
+    """
+    Crops a square window from a 2D image around a specified center.
+
+    The window's boundaries are clamped to the image dimensions, so it will
+    not extend beyond the image edges.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        The 2D image array to crop from.
+    center_x : int
+        The X-coordinate (column index) of the desired window center.
+    center_y : int
+        The Y-coordinate (row index) of the desired window center.
+    window_size : int
+        The desired side length of the square window in pixels.
+
+    Returns
+    -------
+    np.ndarray
+        The cropped 2D image window.
+    """
     # Check if number is even, add one if so
     # if window_size%2 == 0:
     #     window_size += 1

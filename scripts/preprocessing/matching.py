@@ -10,19 +10,59 @@ import numpy as np
 
 def match_annotations(apo_annotations, details, tracked_masks, gt_filtered, dt_annots):
     """
-    Match manual annotations with stardist detections.
-    
-    Parameters:
-        apo_annotations (DataFrame): DataFrame containing manual annotations.
-        details (dict or list): Details loaded from the stardist output, e.g., centroids.
-        tracked_masks (ndarray): The mask array with btrack track IDs.
-        gt_filtered (ndarray): The filtered segmentation array.
-        dt_annots (int): Manual annotations time resolution
-        
-    Returns:
-        DataFrame: The apo_annotations DataFrame updated with matching information.
-        dict: A dictionary containing evaluation metrics (e.g. num_matches, num_mismatches,
-              distances for alternative matching, etc.)
+    Matches manual annotations with segmented and tracked objects.
+
+    This function attempts to find corresponding automated detections and tracks
+    for each manual annotation point. It uses a multi-stage matching strategy:
+    direct pixel lookup, nearest centroid, and a temporal neighborhood search.
+
+    Parameters
+    ----------
+    apo_annotations : pd.DataFrame
+        DataFrame containing manual annotations. Expected columns:
+        't' (time frame), 'x' (x-coordinate), 'y' (y-coordinate).
+    details : list of dict
+        List of dictionaries, one per time point, containing segmentation
+        details. Each dictionary is expected to have a 'points' key,
+        where `details[t]['points']` is a list/array of (y, x) centroids
+        for objects in frame `t`.
+    tracked_masks : np.ndarray
+        A 3D NumPy array (time, height, width) where non-zero pixels
+        contain unique btrack `track_id`s.
+    gt_filtered : np.ndarray
+        A 3D NumPy array (time, height, width) where non-zero pixels
+        contain unique `obj_id`s after filtering. Used for getting `obj_id`
+        at a matched location.
+    dt_annots : int
+        The time resolution of manual annotations in minutes per frame.
+        Used to synchronize annotation time points with image frames.
+
+    Returns
+    -------
+    pd.DataFrame
+        The `apo_annotations` DataFrame updated with new columns:
+        - 'matching_object' (int): The `obj_id` of the matched segmented object.
+        - 'matching_track' (int): The `track_id` of the matched trajectory.
+        - 'strdst_x' (float): X-coordinate of the matched object's centroid.
+        - 'strdst_y' (float): Y-coordinate of the matched object's centroid.
+        - 'delta_ts' (int): Temporal offset (in frames) from the annotation's
+          frame where a match was found (0 if found in the same frame).
+    dict
+        A dictionary containing evaluation metrics:
+        - 'num_matches' (int): Count of annotations successfully matched.
+        - 'num_mismatches' (int): Count of annotations with no suitable match.
+        - 'dist_paolo_stardist' (list): Euclidean distance between manual
+          annotation and the centroid of the finally matched object.
+        - 'dist_alt_matching' (list): Euclidean distance between manual
+          annotation and the closest detected centroid in the same frame.
+
+    Notes
+    -----
+    - Assumes `details[t]['points']` provides (y, x) coordinates for centroids.
+    - Assumes `obj_id`s in `gt_filtered` are 1-based for indexing into `details[t]['points']`.
+    - Manual annotation time ('t') is adjusted: `t * dt_annots - 1` to align
+      with 0-indexed segmentation frames.
+    - The temporal search window for a match is fixed to +/- 3 frames.
     """
     delta_ts = []
     corresponding_objs = []
@@ -114,12 +154,28 @@ def check_temporal_compatibility(
         experiments_df: pd.DataFrame,
         target_interval: int
     ) -> tuple[bool, str | int]:
-    """Check compatibility between acquisition frequency and target interval.
-    
-    Returns:
-        tuple: (is_valid: bool, result: str|int)
-        - If valid: (True, acquisition_freq: int)
-        - If invalid: (False, error_message: str)
+    """
+    Checks compatibility between experiment acquisition frequency and target interval.
+
+    Extracts the acquisition frequency for a given experiment from a DataFrame
+    and validates if it's compatible with a specified target interval.
+
+    Parameters
+    ----------
+    filename : str
+        The filename (e.g., "ExpXX_SiteXX") from which the experiment ID is extracted.
+    experiments_df : pd.DataFrame
+        DataFrame containing experiment parameters, expected to have an
+        'Experiment' column and an 'Acquisition_frequency(min)' column.
+    target_interval : int
+        The desired target interval in minutes for processing.
+
+    Returns
+    -------
+    tuple[bool, str | int]
+        A tuple indicating validity and result:
+        - (True, acquisition_freq: int) if compatible.
+        - (False, error_message: str) if incompatible, with a reason.
     """
     experiment_id = filename.split('_')[0]
     matching_row = experiments_df[experiments_df['Experiment'] == experiment_id]
