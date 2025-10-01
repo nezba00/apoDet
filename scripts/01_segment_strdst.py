@@ -48,27 +48,24 @@ from preprocessing import (filter_segmentation, get_image_paths,
                            run_segmentation, get_experiment_info,
                            SEGMENTATION_CONFIG)
 
-# Variables
-# Directory Paths
+
+# Load variables from config file
 # Input
 IMG_DIR = SEGMENTATION_CONFIG['IMG_DIR']
+EXPERIMENT_INFO = SEGMENTATION_CONFIG['EXPERIMENT_INFO']    # Path for exp list
+SAVE_DATA = SEGMENTATION_CONFIG['SAVE_DATA']    # Flag for saving
+USE_GPU = SEGMENTATION_CONFIG['USE_GPU']    # Flag for GPU use
+MIN_NUC_SIZE = SEGMENTATION_CONFIG['MIN_NUC_SIZE']  # Removes objects < x
+MIN_NUC_SIZE_20x = SEGMENTATION_CONFIG['MIN_NUC_SIZE_20x']
 # Output
 MASK_DIR = SEGMENTATION_CONFIG['MASK_DIR']  # Stardist label predictions
 MASK_DIR_NO_FILT = SEGMENTATION_CONFIG['MASK_DIR_NO_FILT']
-DF_DIR = SEGMENTATION_CONFIG['DF_DIR']
-DETAILS_DIR = SEGMENTATION_CONFIG['DETAILS_DIR']
-LOG_DIR = SEGMENTATION_CONFIG['LOG_DIR']  # Folder for logs
+DF_DIR = SEGMENTATION_CONFIG['DF_DIR']      # Summary DF
+DETAILS_DIR = SEGMENTATION_CONFIG['DETAILS_DIR']    # Stardist details
+LOG_DIR = SEGMENTATION_CONFIG['LOG_DIR']  # Logs
 
 
-# Processing Configuration
-SAVE_DATA = SEGMENTATION_CONFIG['SAVE_DATA']
-USE_GPU = SEGMENTATION_CONFIG['USE_GPU']
-
-MIN_NUC_SIZE = SEGMENTATION_CONFIG['MIN_NUC_SIZE']  # Removes objects < x
-MIN_NUC_SIZE_20x = SEGMENTATION_CONFIG['MIN_NUC_SIZE_20x']
-EXPERIMENT_INFO = SEGMENTATION_CONFIG['EXPERIMENT_INFO']
-
-# Logger Set Up
+# Logger Set Up (Module-Level)
 logger = logging.getLogger(__name__)
 # Get the current timestamp
 # Define log directory and ensure it exists
@@ -108,22 +105,22 @@ for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
 # Set up GT_mask prediction with stardist
-if USE_GPU:         # Code inside if statement only necessary if GPU is used
+if USE_GPU:         # Set up GPU if necessary
     import gputools
     from csbdeep.utils.tf import limit_gpu_memory
     limit_gpu_memory(None, allow_growth=True)
 model = StarDist2D.from_pretrained("2D_versatile_fluo")    # Load pretrained model
 axis_norm = (0, 1)    # for normalization
 
-# Load experiment info to choose correct config
+# Load experiment info to choose correct config later (e.g. 20x or 40x)
 try:
     experiments_list = pd.read_csv(EXPERIMENT_INFO, header=0)
-except FileNotFoundError as e:
+except FileNotFoundError as e:      # Quit if no experiments list available
     logger.critical("Critical error: experiment list file not found: "
                     f"{EXPERIMENT_INFO}. Aborting script.")
     sys.exit(1)
 
-# Loop over all files in target directory (predict labels, track and crop windows for each)
+# Loop over all files in target directory (predict masks for each)
 logger.info("Starting Segmentation.")
 for path, filename in zip(image_paths, filenames):
     logger.info(f"Processing {filename}")
@@ -134,10 +131,10 @@ for path, filename in zip(image_paths, filenames):
     logger.info("\t\tSegmentation done.")
 
     # Choose correct MIN_NUC_SIZE to filter (objects smaller at smaller magnifications!)
-    exp_info = get_experiment_info(filename, experiments_list)
-    if not exp_info['found']:
+    exp_info = get_experiment_info(filename, experiments_list)  # Get current Experiment Info
+    if not exp_info['found']:   # Fall back to default value if ExpXX not found
         min_nuc_size = MIN_NUC_SIZE
-        logger.info("\t\tChose default MIN_NUC_SIZE (for 40x imgs)")
+        logger.info("\t\tChose default MIN_NUC_SIZE (assumed 40x imgs)")
     elif exp_info['magnification'] == '20x':
         min_nuc_size = MIN_NUC_SIZE_20x
         logger.info("\t\tChose MIN_NUC_SIZE_20x")
@@ -162,7 +159,6 @@ for path, filename in zip(image_paths, filenames):
             index=False
         )
         logger.info(f"\t\tSummary-Df saved at: {os.path.join(DF_DIR, f'{filename}_pd_df.csv')}")
-
         # Save Stardist details
         details_path = os.path.join(DETAILS_DIR, f'{filename}.pkl')
         with open(details_path, 'wb') as f:
