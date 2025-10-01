@@ -31,62 +31,60 @@ Outputs:
 
 """
 
-# Imports
+# -- Imports --
 # Standard library imports
 import logging
 import os
 import sys
 from datetime import datetime
-
-
 # Third-party imports
 # Data handling
 import numpy as np
 import pandas as pd
-
 # Visualization
 import matplotlib.pyplot as plt
 
-# Utilities
-from preprocessing import (convert_obj_to_track_ids, get_image_paths,
-                           run_tracking, remove_outlier_frames,
-                           get_btrack_config_path, TRACKING_CONFIG)
+from preprocessing import (
+    convert_obj_to_track_ids, 
+    get_image_paths,
+    run_tracking, 
+    remove_outlier_frames,
+    get_btrack_config_path, 
+    TRACKING_CONFIG
+)
 
 
-# Variables
-# Directory Paths
-# Input
-IMG_DIR = TRACKING_CONFIG['IMG_DIR']
+# -- Variables from config file --
+# Input Paths
+IMG_DIR = TRACKING_CONFIG['IMG_DIR']    # Directory with raw images
 MASK_DIR = TRACKING_CONFIG['MASK_DIR']  # Stardist label predictions
 DF_DIR = TRACKING_CONFIG['DF_DIR']
-
-# Output
+EXPERIMENT_INFO = TRACKING_CONFIG['EXPERIMENT_INFO']
+# Output Paths
 TRACKED_MASK_DIR = TRACKING_CONFIG['TRACKED_MASK_DIR']
 TRACK_DF_DIR = TRACKING_CONFIG['TRACK_DF_DIR']
-
-# Define plot directory
 PLOT_DIR = TRACKING_CONFIG['PLOT_DIR']
+LOG_DIR = TRACKING_CONFIG['LOG_DIR']    # Folder for logs
+# Tracking Parameters & Settings
 RUN_NAME = TRACKING_CONFIG['RUN_NAME']
-
-# Tracking Parameters
 BT_CONFIG_FILE = TRACKING_CONFIG['BT_CONFIG_FILE']  # Path to btrack config file
 EPS_TRACK = TRACKING_CONFIG['EPS_TRACK']    # Tracking radius [px]
 TRK_MIN_LEN = TRACKING_CONFIG['TRK_MIN_LEN']    # Minimum track length [frames]
-EXPERIMENT_INFO = TRACKING_CONFIG['EXPERIMENT_INFO']
 
-# Logger Set Up
+
+# Logger Set Up (Module-Level)
 logger = logging.getLogger(__name__)
 # Get the current timestamp
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 # Define log directory and ensure it exists
-LOG_DIR = TRACKING_CONFIG['LOG_DIR']    # Folder for logs
 os.makedirs(LOG_DIR, exist_ok=True)  # Create directory if it doesn't exist
 
+# Define full log file path
 LOG_FILENAME = f"tracking_Btrack_{timestamp}.log"
 log_path = os.path.join(LOG_DIR, LOG_FILENAME)
 
-# Set up logging
+# Logger Configuration
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -111,8 +109,8 @@ filenames = [os.path.splitext(os.path.basename(path))[0]
              for path in image_paths]
 logger.info(f"Detected {len(filenames)} files in specified directories.")
 
-# Create directories for saving if they do not exist
-output_dirs = [MASK_DIR, DF_DIR, TRACK_DF_DIR, TRACKED_MASK_DIR]
+# Create output directories if they do not exist
+output_dirs = [TRACK_DF_DIR, TRACKED_MASK_DIR, PLOT_DIR]
 for path in output_dirs:
     os.makedirs(path, exist_ok=True)
 
@@ -125,17 +123,17 @@ except FileNotFoundError as e:
     sys.exit(1)
 
 
-
-# Loop over all files in target directory (predict labels, track and crop windows for each)
+# Loop over all files in target directory
 logger.info("Starting to process files.")
 for path, filename in zip(image_paths, filenames):
-    # Define and load labels
     logger.info(f"\tLoading {filename}.")
+
+    # -- 1. Data Loading & Pre-processing --
     mask_path = os.path.join(MASK_DIR, f'{filename}.npz')
     with np.load(mask_path) as data:
-        gt_filtered = data['gt']  # Access the saved array
+        gt_filtered = data['gt']  # Load the saved segmentation mask
 
-    # Replace outlier frames by zeroslike. Outliers show more than 20x MAD (median absolute deviation)
+    # Replace outlier frames by zeroslike. Outliers show more than 20x mean SAD
     gt_filtered, indices = remove_outlier_frames(gt_filtered)
     logger.info(f'{len(indices)} outlier frames replaced by frame with zeroes.')
 
@@ -143,14 +141,16 @@ for path, filename in zip(image_paths, filenames):
     df_path = os.path.join(DF_DIR, f'{filename}_pd_df.csv')
     strdst_df = pd.read_csv(df_path, header=0)
 
+    # -- 2. Config Selection --
     # Choose correct btrack config file depending on magnification and delta t
     btrack_config_path, track_radius = get_btrack_config_path(filename,
                                                                  experiments_list)
     
 
-    # Run tracking with Btrack
+    # -- 3. Run Tracking --
     dfBTracks = run_tracking(gt_filtered, btrack_config_path, track_radius)
 
+    # Map Btrack results to the Stardist summary df
     logger.info("\tMerging information from Btrack and stardist.")
     merged_df = strdst_df.merge(dfBTracks.drop(columns=["x", "y", "area"]),
                                 on=["obj_id", "t"],
@@ -161,11 +161,13 @@ for path, filename in zip(image_paths, filenames):
 
     logger.info("\t\tComplete.")
 
+    # -- 4. Save Tracking Results --
     # Save merged DataFrame to a CSV file
     merge_df_path = os.path.join(TRACK_DF_DIR, f"{filename}.csv")
     merged_df.to_csv(merge_df_path, index=False)
     logger.info(f"\tSaved merged dfs at: {merge_df_path}")
 
+    # -- 5. Convert Masks and Save -- 
     # Create a mask with btrack track_ids instead of stardists obj_ids
     logger.info("\tConverting Obj_IDs to Track_IDs in stardist masks.")
     tracked_masks = convert_obj_to_track_ids(gt_filtered, merged_df)
@@ -174,13 +176,13 @@ for path, filename in zip(image_paths, filenames):
     np.savez_compressed(mask_path, gt=tracked_masks)
     logger.info(f"\t\tMask saved at: {mask_path}")
 
+
+    # -- 6. Plot Track Length Histograms --
     # Create directory for track length histogram
     output_dir = os.path.join(PLOT_DIR, RUN_NAME, "btrack_hists")
-    os.makedirs(output_dir, exist_ok=True)  # Create directory if it doesn't exist
-
+    os.makedirs(output_dir, exist_ok=True)
     # Count occurrences of each track_id to determine track lengths
     track_lengths = merged_df["track_id"].value_counts()
-
     # Plot histogram
     plt.figure(figsize=(10, 6))
     plt.hist(track_lengths, bins=20, edgecolor="black", alpha=0.7)
@@ -190,7 +192,6 @@ for path, filename in zip(image_paths, filenames):
     # Save plot
     plot_filename = os.path.join(output_dir, f"{filename}_track_lengths.png")
     plt.savefig(plot_filename)
-
     plt.close()
 
     # Create similar plot but with tracks < TRK_MIN_LEN filtered out
@@ -198,7 +199,6 @@ for path, filename in zip(image_paths, filenames):
     merged_df_long = merged_df[track_sizes >= TRK_MIN_LEN].copy()
     # Count occurrences of each track_id to determine track lengths
     track_lengths = merged_df_long["track_id"].value_counts()
-
     # Plot histogram
     plt.figure(figsize=(10, 6))
     plt.hist(track_lengths, bins=20, edgecolor="black", alpha=0.7)
@@ -208,5 +208,4 @@ for path, filename in zip(image_paths, filenames):
     # Save plot
     plot_filename = os.path.join(output_dir, f"{filename}_track_lengths_long.png")
     plt.savefig(plot_filename)
-
     plt.close()
