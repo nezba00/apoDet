@@ -34,33 +34,35 @@ Outputs:
 
 """
 
-# Imports
+# -- Imports --
 # Standard library imports
 import logging
 import os
 import sys
 from datetime import datetime
-
 # Third-party imports
 # Data handling
 import numpy as np
 import pandas as pd
-
 # Image I/O and processing
 import tifffile as tiff
 from skimage import util, measure
-
 # Visualization
 import matplotlib.pyplot as plt
-
-# Utilities
 from tqdm import tqdm
-from preprocessing import (check_temporal_compatibility, crop_window,
-                           get_image_paths, load_image_stack, block_window_in_array,
-                           get_experiment_info, APO_CROP_CONFIG)
+
+from preprocessing import (
+    check_temporal_compatibility, 
+    crop_window,
+    get_image_paths, 
+    load_image_stack, 
+    block_window_in_array,
+    get_experiment_info, 
+    APO_CROP_CONFIG
+)
 
 
-# Variables
+# -- Variables --
 # Directory Paths
 # Input
 IMG_DIR = APO_CROP_CONFIG['IMG_DIR']
@@ -68,7 +70,6 @@ EXPERIMENT_INFO = APO_CROP_CONFIG['EXPERIMENT_INFO']
 CSV_DIR = APO_CROP_CONFIG['CSV_DIR']    # File with manual and stardist centroids
 TRACKED_MASK_DIR = APO_CROP_CONFIG['TRACKED_MASK_DIR']
 TRACK_DF_DIR = APO_CROP_CONFIG['TRACK_DF_DIR']
-
 # Output
 CROPS_DIR = APO_CROP_CONFIG['CROPS_DIR']    # Directory with .tif files for QC
 WINDOWS_DIR = APO_CROP_CONFIG['WINDOWS_DIR']    # Directory with crops for scDINO
@@ -81,24 +82,23 @@ APO_CHECK_ARRAY_DIR = APO_CROP_CONFIG['APO_CHECK_ARRAY_DIR']
 PLOT_DIR = APO_CROP_CONFIG['PLOT_DIR']
 RUN_NAME = APO_CROP_CONFIG['RUN_NAME']
 
-
-# Tracking Parameters
+# Cropping Parameters
 TRK_MIN_LEN = APO_CROP_CONFIG['TRK_MIN_LEN']    # Minimum track length [frames]
-
-# Time settings
 MAX_TRACKING_DURATION = APO_CROP_CONFIG['MAX_TRACKING_DURATION']    # In minutes
 FRAME_INTERVAL = APO_CROP_CONFIG['FRAME_INTERVAL']  # minutes between images
-
 WINDOW_SIZE = APO_CROP_CONFIG['WINDOW_SIZE']
 WINDOW_SIZE_20X = APO_CROP_CONFIG['WINDOW_SIZE_20X']
 
+# Thresholds for filtering images for shape/img properties
 ECCENTRICITY_THR = APO_CROP_CONFIG['ECCENTRICITY_THR']
 SOLIDITY_THR = APO_CROP_CONFIG['SOLIDITY_THR']
 CROP_STD_THR = APO_CROP_CONFIG['CROP_STD_THR']
 CROP_MEAN_INT_THR = APO_CROP_CONFIG['CROP_MEAN_INT_THR']
 NUM_BLOCKED_FRAMES = APO_CROP_CONFIG['NUM_BLOCKED_FRAMES']
 
-# Logger Set Up
+
+# -- Logging --
+# Logger Set Up (Module-Level)
 logger = logging.getLogger(__name__)
 # Get the current timestamp
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -128,7 +128,8 @@ logger = logging.getLogger(__name__)
 logging.getLogger('btrack').setLevel(logging.WARNING)
 
 
-# Load image paths in specified directory
+# -- Data Loading & Output Directory Creation --
+# Load paths of all image files in specified directory
 logger.info("Starting Image Processing")
 image_paths = get_image_paths(os.path.join(IMG_DIR))
 filenames = [os.path.splitext(os.path.basename(path))[0]
@@ -147,7 +148,7 @@ for path in output_dirs:
 os.makedirs(os.path.join(FEATURES_DIR, 'raw_images'), exist_ok=True)
 os.makedirs(os.path.join(FEATURES_DIR, 'masks'), exist_ok=True)
 
-# Frame rate and movie length for crops
+# Load experiment info list
 try:
     experiments_list = pd.read_csv(EXPERIMENT_INFO, header=0)
 except FileNotFoundError as e:
@@ -156,21 +157,22 @@ except FileNotFoundError as e:
     sys.exit(1)
 num_timepoints = MAX_TRACKING_DURATION // FRAME_INTERVAL    # eg 20mins/5min = 4 images.
 
+
 # Lists and counters for evaluation of the matching and cropping process
-# initalize a list to investigate track lengths after apoptosis
+# allows investigation of track length after apoptosis
 survival_times = []
 all_features = []
 
-# Loop over all files in target directory (predict labels, track and crop windows for each)
+# Loop over all files in target directory
 logger.info("Starting to process files.")
 for path, filename in zip(image_paths, filenames):
     logger.info(f"Processing {filename}")
 
+    # -- Preparations for Cropping --
+    # Check whether current file is compatible with chosen FRAME_INTERVAL
     is_valid, result = check_temporal_compatibility(filename,
                                                     experiments_list,
                                                     FRAME_INTERVAL)
-    # print(f"Valid Stack = {is_valid}: acq_freq = {result}")
-
     # Skip current file if it is not compatible temporally
     if not is_valid:
         logger.warning(f"\t{result}")
@@ -180,11 +182,11 @@ for path, filename in zip(image_paths, filenames):
     acquisition_freq = result
     step = FRAME_INTERVAL // acquisition_freq    # e.g. 5 // 1 = 5 -> 1 image every 5 frames
     num_frames = MAX_TRACKING_DURATION // acquisition_freq
-    # Adds + 1 if even to have the annotated pixel centered in the window
 
+    # Load information for current file
     try:
         merge_df_path = os.path.join(TRACK_DF_DIR, f"{filename}.csv")
-        merged_df = pd.read_csv(merge_df_path)
+        merged_df = pd.read_csv(merge_df_path)  # x, y, t, obj_ID, trk_ID, ...
         track_sizes= merged_df.groupby("track_id")["track_id"].transform('size')
         required_frames = (FRAME_INTERVAL // acquisition_freq) * (num_timepoints + 1)
         merged_df_long = merged_df[track_sizes >= required_frames].copy()
@@ -202,7 +204,7 @@ for path, filename in zip(image_paths, filenames):
                        "Annotations of apoptotic cells not found.")
         continue
 
-    
+    # Set 20x or 40x config
     exp_info = get_experiment_info(filename, experiments_list)
     if not exp_info['found']:
         window_size = WINDOW_SIZE
@@ -232,7 +234,7 @@ for path, filename in zip(image_paths, filenames):
     logger.debug(f"\t\tStep Size: {step}")
     logger.debug(f"\t\t Imgs in Crops: {num_timepoints} -> +1 for t0")
 
-    # Create directory for cropped windows
+    # Create directories for cropped windows
     os.makedirs(os.path.join(CROPS_DIR, filename), exist_ok=True)
     os.makedirs(os.path.join(CROPS_DIR, f'no_apo_{filename}'), exist_ok=True)
     os.makedirs(os.path.join(CROPS_DIR, f'random_{filename}'), exist_ok=True)
