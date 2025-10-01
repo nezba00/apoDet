@@ -270,7 +270,7 @@ for path, filename in zip(image_paths, filenames):
                        total=len(apo_annotations),
                        desc="Processing Annotations"):
         current_track_id = row.loc['matching_track']
-        current_t = row.loc['t'] + row.loc['delta_ts']
+        current_t = row.loc['correct_t'] + row.loc['delta_ts']
 
         apo_track_ids.loc[i, 'track_id'] = current_track_id
         apo_track_ids.loc[i, 'apo_start_t'] = current_t
@@ -284,7 +284,7 @@ for path, filename in zip(image_paths, filenames):
             # If not we block a window
             annot_x = int(row['x'])
             annot_y = int(row['y'])
-            annot_t = int(row['t'])
+            annot_t = int(row['correct_t'])
             # We block larger regions if we could not match an annotation
             window_size_no_match = 2*window_size
             num_block_no_match = 2*NUM_BLOCKED_FRAMES

@@ -185,6 +185,8 @@ for path, filename in zip(image_paths, filenames):
     dist_paolo_stardist.append(metrics['dist_paolo_stardist'])
     dist_alt_matching.append(metrics['dist_alt_matching'])
 
+    apo_annotations['correct_t'] = apo_annotations['t']*multiplier
+
     # Save again as CSV with added stardist centroids
     apo_annotations.to_csv(os.path.join(CSV_DIR, f'{filename}.csv'),
                            index=False)
