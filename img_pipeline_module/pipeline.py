@@ -192,9 +192,11 @@ def main():
             matching_successful = False # Ensure flag is False if skipped
 
         # --- CROPPING STAGE ---
-        if matching_successful: # <--- CRITICAL NEW CHECK
+        if matching_successful:
             try:
-                cropping_module.process(filename, experiments_list)
+                cropping_module.process(filename, experiments_list,
+                                        imgs, merged_df, tracked_masks,
+                                        apo_annotations)
                 logger.info(f"Cropping successfully completed for {filename}.")
             except Exception as e:
                 logger.error(f"Error in Cropping for {filename}: {e}", exc_info=True)

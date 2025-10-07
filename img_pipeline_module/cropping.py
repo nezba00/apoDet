@@ -95,7 +95,10 @@ class Cropping:
         os.makedirs(os.path.join(self.features_dir, 'masks'), exist_ok=True)
         os.makedirs(os.path.join(self.plot_dir, self.run_name), exist_ok=True) # For feature plots
 
-    def process(self, filename: str, experiments_list: pd.DataFrame):
+    def process(self, filename: str, experiments_list: pd.DataFrame,
+                imgs: np.ndarray, merged_df: pd.DataFrame,
+                tracked_masks: np.ndarray,
+                apo_annotations: pd.DataFrame):
         """
         The main method to run the cropping logic for a single file.
 
@@ -113,9 +116,6 @@ class Cropping:
         """
         logger.info(f"Starting Cropping for {filename}")
 
-        # --- Preparations and Data Loading (Start of your loop logic) ---
-        img_path = os.path.join(self.img_dir, f'{filename}.tif')
-        
         # 1. Temporal Compatibility Check
         is_valid, result = check_temporal_compatibility(
             filename, experiments_list, self.frame_interval
@@ -130,24 +130,10 @@ class Cropping:
         num_timepoints = self.max_tracking_duration // self.frame_interval
 
         # 2. Load DataFrames
-        try:
-            merge_df_path = os.path.join(self.track_df_dir, f"{filename}.csv")
-            merged_df = pd.read_csv(merge_df_path)
-            
-            track_sizes = merged_df.groupby("track_id")["track_id"].transform('size')
-            required_frames = (self.frame_interval // acquisition_freq) * (num_timepoints + 1)
-            merged_df_long = merged_df[track_sizes >= required_frames].copy()
-            logger.info(f"\tUsing min track length of {required_frames} frames.")
-        except Exception as e:
-            logger.warning(f"\tSkipping {filename}: DF with track_ids not found. Error: {e}")
-            return {'status': 'skipped', 'reason': 'tracking_df_missing'}
-
-        try:
-            csv_path = os.path.join(self.csv_dir, f'{filename}.csv')
-            apo_annotations = pd.read_csv(csv_path)
-        except Exception as e:
-            logger.warning(f"\tSkipping {filename}: Annotations of apoptotic cells not found. Error: {e}")
-            return {'status': 'skipped', 'reason': 'annotations_missing'}
+        track_sizes = merged_df.groupby("track_id")["track_id"].transform('size')
+        required_frames = (self.frame_interval // acquisition_freq) * (num_timepoints + 1)
+        merged_df_long = merged_df[track_sizes >= required_frames].copy()
+        logger.info(f"\tUsing min track length of {required_frames} frames.")
 
         # 3. Magnification and Window Size Setup
         exp_info = get_experiment_info(filename, experiments_list)
@@ -157,15 +143,7 @@ class Cropping:
         window_dir = self.windows_dir_20x if magnification == '20x' else self.windows_dir
         logger.info(f"\tUsing {window_size} window size for {magnification}")
 
-        # 4. Load Masks and Images
-        try:
-            mask_path = os.path.join(self.tracked_mask_dir, f'{filename}.npz')
-            tracked_masks = np.load(mask_path)['gt']
-            imgs = load_image_stack(img_path)
-        except Exception as e:
-            logger.warning(f"\tSkipping {filename}: Image/Mask loading failed. Error: {e}")
-            return {'status': 'skipped', 'reason': 'image_mask_loading_failed'}
-
+        # 4. Directory Setup and Variable Initialization
         # Create file-specific output directories
         os.makedirs(os.path.join(self.crops_dir, filename), exist_ok=True)
         os.makedirs(os.path.join(self.crops_dir, f'no_apo_{filename}'), exist_ok=True)
