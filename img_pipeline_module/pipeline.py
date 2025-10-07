@@ -141,7 +141,7 @@ def main():
         # --- TRACKING STAGE ---
         try:
             merged_df, tracked_masks = tracking_module.process(
-                filename=filename,
+                filename, gt_filtered, summary_df, 
                 experiments_list=experiments_list
             )
             if merged_df is not None:

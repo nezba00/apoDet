@@ -46,12 +46,16 @@ class Tracking:
         
         logger.info("Tracking module initialized.")
 
-    def process(self, filename: str, experiments_list: pd.DataFrame):
+    def process(self, filename: str,
+                mask: np.ndarray, 
+                segmentation_df: pd.DataFrame, 
+                experiments_list: pd.DataFrame):
         """
         Runs the full tracking process for a single image stack.
 
         Args:
-            filename: The base name of the file (e.g., 'ExpXX_SiteYY').
+            mask: An Array with segmentation masks
+            segmentation_df: DataFrame with centroids and obj_id
             experiments_list: DataFrame with experiment metadata.
 
         Returns:
@@ -60,48 +64,36 @@ class Tracking:
         """
         logger.info(f"\tStarting Tracking for {filename}.")
 
-        # -- 1. Data Loading --
-        mask_path = os.path.join(self.mask_dir, f'{filename}.npz')
-        df_path = os.path.join(self.df_dir, f'{filename}_pd_df.csv')
-        
-        try:
-            with np.load(mask_path) as data:
-                gt_filtered = data['gt'] 
-            strdst_df = pd.read_csv(df_path, header=0)
-            logger.info("\t\tLoaded segmentation masks and summary DataFrame.")
-        except FileNotFoundError as e:
-            logger.error(f"\t\tRequired segmentation file not found for {filename}: {e}")
-            return None, None
 
-        # -- 2. Pre-processing: Remove Outlier Frames --
-        gt_filtered, outlier_indices = remove_outlier_frames(gt_filtered)
+        # -- 1. Pre-processing: Remove Outlier Frames --
+        mask_filt, outlier_indices = remove_outlier_frames(mask)
         logger.info(f'\t\t{len(outlier_indices)} outlier frames replaced with zeros.')
 
-        # -- 3. Config Selection --
+        # -- 2. Config Selection --
         bt_config_path, track_radius = get_btrack_params(
             filename, experiments_list, self.config
         )
         logger.info(f"\t\tBTrack Config: {os.path.basename(bt_config_path)}, Radius: {track_radius}px")
 
-        # -- 4. Run Tracking --
-        dfBTracks = run_tracking(gt_filtered, bt_config_path, track_radius)
+        # -- 3. Run Tracking --
+        dfBTracks = run_tracking(mask_filt, bt_config_path, track_radius)
         
-        # -- 5. Merge Data --
-        merged_df = strdst_df.merge(
+        # -- 4. Merge Data --
+        merged_df = segmentation_df.merge(
             dfBTracks.drop(columns=["x", "y"]), # Drop BTrack's x,y, keep Stardist's
             on=["obj_id", "t"],
             how="left"
         )
         logger.info("\t\tMerged information from BTrack and Stardist.")
 
-        # -- 6. Convert Masks --
-        tracked_masks = convert_obj_to_track_ids(gt_filtered, merged_df)
+        # -- 5. Convert Masks --
+        tracked_masks = convert_obj_to_track_ids(mask_filt, merged_df)
         logger.info("\t\tConverted object IDs to track IDs in masks.")
 
-        # -- 7. Save Outputs (I/O Handler) --
+        # -- 6. Save Outputs (I/O Handler) --
         self._save_outputs(filename, merged_df, tracked_masks)
         
-        # -- 8. Plot Track Lengths --
+        # -- 7. Plot Track Lengths --
         plot_track_lengths(
             merged_df, 
             self.min_track_len, 
