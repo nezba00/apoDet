@@ -43,50 +43,24 @@ class Matching:
         
         logger.info("Matching module initialized.")
 
-    def process(self, filename: str, experiments_list: pd.DataFrame):
+    def process(self, filename: str,
+                apo_annotations: pd.DataFrame, details:pd.DataFrame,
+                tracked_masks: np.ndarray, gt_filtered: np.ndarray,
+                experiments_list: pd.DataFrame):
         """
         Runs the matching process for a single file.
 
         Args:
             filename: The base name of the file (e.g., 'ExpXX_SiteYY').
+            apo_annotations: Dataframe with cols
             experiments_list: DataFrame with experiment metadata.
             
         Returns:
             dict: The metrics dictionary for this file, or None on failure.
         """
         logger.info(f"\tStarting Matching for {filename}.")
-        
-        # --- 1. Data Loading ---
-        try:
-            # Load Manual Apoptosis annots from csv
-            apo_file = os.path.join(self.apo_dir, f'{filename}.csv')
-            apo_annotations = pd.read_csv(apo_file, header=None,
-                                          names=['filename', 'x', 'y', 't'],
-                                          on_bad_lines='skip').dropna()
-                                            # TODO potentially remove .dropna()
-            
-            # Load details file from stardist (with centroids, Obj_ID, etc.)
-            details_path = os.path.join(self.details_dir, f'{filename}.pkl')
-            with open(details_path, 'rb') as f:
-                details = pickle.load(f)
 
-            # Load mask file with track_IDs and object_IDs
-            tracked_mask_path = os.path.join(self.tracked_mask_dir, f'{filename}.npz')
-            tracked_masks = np.load(tracked_mask_path)['gt']
-
-            mask_path = os.path.join(self.mask_dir, f'{filename}.npz')
-            gt_filtered = np.load(mask_path)['gt']
-            
-            logger.info("\t\tLoaded all required data files.")
-            
-        except FileNotFoundError as e:
-            logger.error(f"\t\tRequired file not found for {filename}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"\t\tError loading data for {filename}: {e}")
-            return None
-
-        # --- 2. Determine Time Multiplier ---
+        # --- 1. Determine Time Multiplier ---
         exp_info = get_experiment_info(filename, experiments_list)
         # Use default apo annotation frequency of 5 min if not specified
         apo_annotation_freq = exp_info['apo_annotation_freq'] if exp_info['apo_annotation_freq'] is not None else 5 
@@ -101,12 +75,12 @@ class Matching:
             multiplier = dt_apo_annots // dt_acq
             logger.info(f"\t\tTime multiplier: {dt_apo_annots} / {dt_acq} = {multiplier}.")
 
-        # --- 3. Run Matching ---
-        apo_annotations, metrics = match_annotations(
+        # --- 2. Run Matching ---
+        apo_annotations_match, metrics = match_annotations(
             apo_annotations, details, tracked_masks, gt_filtered, multiplier
         )
 
-        # --- 4. Update Metrics and Save ---
+        # --- 3. Update Metrics and Save ---
         self.total_matches += metrics['num_matches']
         self.total_mismatches += metrics['num_mismatches']
         self.all_metrics.append(metrics)
@@ -116,14 +90,14 @@ class Matching:
         logger.info(f"\t\t{success_rate:.2f}% Success Rate")
 
         # Apply multiplier to time column for later analysis
-        apo_annotations['correct_t'] = apo_annotations['t'] * multiplier
+        apo_annotations_match['correct_t'] = apo_annotations_match['t'] * multiplier
 
         # Save output
         output_path = os.path.join(self.csv_dir, f'{filename}.csv')
-        apo_annotations.to_csv(output_path, index=False)
+        apo_annotations_match.to_csv(output_path, index=False)
         logger.info(f"\t\tApo-Annotations with new centroids saved at: {output_path}")
 
-        return metrics
+        return metrics, apo_annotations_match
 
     def finalize(self):
         """Called once at the end of the pipeline to perform final plotting."""

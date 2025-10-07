@@ -107,6 +107,7 @@ def main():
     except FileNotFoundError:
         logger.critical(f"Critical error: experiment list not found at {GLOBAL_EXPERIMENT_INFO_PATH}. Aborting.")
         sys.exit(1)
+
     # 5. Get Image Paths
     image_paths = get_image_paths(IMG_DIR)
     filenames = [os.path.splitext(os.path.basename(path))[0] for path in image_paths]
@@ -127,7 +128,25 @@ def main():
     for path, filename in zip(image_paths, filenames):
         logger.info(f"--- Running Pipeline for {filename} ---")
 
+        try:
+            apo_file = os.path.join(APO_MATCH_CONFIG['APO_DIR'], f'{filename}.csv')
+            # Load annotation file for the current image
+            apo_annotations = pd.read_csv(
+                apo_file, 
+                header=None,
+                names=['filename', 'x', 'y', 't'],
+                on_bad_lines='skip'
+            ).dropna()
+            logger.info(f"Loaded {len(apo_annotations)} apoptosis annotations for {filename}.")
+        except FileNotFoundError:
+            logger.warning(f"Apoptosis annotation file not found for {filename} ({apo_file}). Continuing without annotations.")
+            apo_annotations = pd.DataFrame(columns=['filename', 'x', 'y', 't']) # Create empty DF
+        except Exception as e:
+            logger.error(f"Error loading APO annotations for {filename}: {e}", exc_info=True)
+            apo_annotations = pd.DataFrame(columns=['filename', 'x', 'y', 't']) # Create empty DF
+
         imgs = load_image_stack(path)
+
         
         # --- SEGMENTATION STAGE ---
         try:
@@ -153,7 +172,9 @@ def main():
         # --- MATCHING STAGE ---
         if merged_df is not None:
             try:
-                metrics = matching_module.process(filename, experiments_list)
+                metrics, apo_annotations = matching_module.process(filename, apo_annotations,
+                                        details, tracked_masks, gt_filtered,
+                                        experiments_list)
                 
                 # Add a flag to indicate successful data generation
                 matching_successful = metrics is not None
