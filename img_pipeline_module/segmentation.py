@@ -69,12 +69,12 @@ class Segmentation:
             
         return min_nuc_size
 
-    def process(self, image_path: str, filename: str, experiments_list: pd.DataFrame):
+    def process(self, image_data: np.ndarray, filename: str, experiments_list: pd.DataFrame):
         """
         Runs the full segmentation process for a single image stack.
 
         Args:
-            image_path: Absolute path to the image stack file.
+            image_data: An array of images
             filename: The base name of the file (e.g., 'ExpXX_SiteYY').
             experiments_list: DataFrame with experiment metadata.
 
@@ -89,7 +89,7 @@ class Segmentation:
         
         # 1. Run Segmentation (uses helper from utils)
         # Note: run_segmentation requires the model instance
-        gt_unfiltered, details = run_segmentation(image_path, self.model, self.axis_norm)
+        gt_unfiltered, details = run_segmentation(image_data, self.model, self.axis_norm)
         logger.info("\tSegmentation done.")
 
         # 2. Determine Minimum Size

@@ -16,7 +16,7 @@ except ImportError:
 
 
 # Import the necessary functions and classes from our new package
-from utils import get_image_paths 
+from utils import get_image_paths, load_image_stack
 from segmentation import Segmentation
 from tracking import Tracking
 from matching import Matching
@@ -126,10 +126,13 @@ def main():
     # 7. Main Loop
     for path, filename in zip(image_paths, filenames):
         logger.info(f"--- Running Pipeline for {filename} ---")
+
+        imgs = load_image_stack(path)
         
         # --- SEGMENTATION STAGE ---
         try:
-            segmentation_module.process(path, filename, experiments_list)
+            seg_out = segmentation_module.process(imgs, filename, experiments_list)
+            gt_filtered, summary_df, details, gt_unfiltered = seg_out
             logger.info(f"Segmentation complete for {filename}.")
         except Exception as e:
             logger.error(f"Error in Segmentation for {filename}: {e}", exc_info=True)

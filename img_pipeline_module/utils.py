@@ -154,7 +154,7 @@ def get_experiment_info(filename, experiments_list):
 # --- Segmentation specific functions ---
 
 
-def run_segmentation(path, model, axis_norm):
+def run_segmentation(imgs, model, axis_norm):
     """
     Performs instance segmentation on an image stack.
 
@@ -163,7 +163,7 @@ def run_segmentation(path, model, axis_norm):
 
     Parameters
     ----------
-    path : str
+    imgs : np.ndarray
         Path to the image stack file (e.g., a TIFF stack).
     model
         A segmentation model object (e.g., StarDist model) with a
@@ -181,8 +181,7 @@ def run_segmentation(path, model, axis_norm):
         A list of dictionaries, one per frame, containing prediction details
         from the segmentation model (e.g., centroids, probabilities).
     """
-    h2b_imgs = load_image_stack(path)
-    h2b_imgs_normal = np.asarray([normalize(img, 1, 99.8, axis=axis_norm) for img in h2b_imgs])
+    h2b_imgs_normal = np.asarray([normalize(img, 1, 99.8, axis=axis_norm) for img in imgs])
     
     gt = []
     details = []
@@ -191,7 +190,7 @@ def run_segmentation(path, model, axis_norm):
         gt.append(labels)
         details.append(det)
     gt = np.asarray(gt)
-    return gt, details
+    return gt, details  
 
 def filter_segmentation(gt, details, min_size):
     """
