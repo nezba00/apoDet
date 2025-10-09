@@ -7,7 +7,8 @@ import pandas as pd
 try:
     from config import (
         RUN_NAME, IMG_DIR, BASE_LOG_DIR, LOG_DIR, BASE_DATA_DIR, PLOT_DIR,
-        SEGMENTATION_CONFIG, TRACKING_CONFIG, APO_MATCH_CONFIG, APO_CROP_CONFIG
+        SEGMENTATION_CONFIG, TRACKING_CONFIG, APO_MATCH_CONFIG, APO_CROP_CONFIG,
+        UPSAMPLING_CONFIG
     )
 except ImportError:
     print("Error: Could not import configurations from config.py.")
@@ -21,6 +22,7 @@ from segmentation import Segmentation
 from tracking import Tracking
 from matching import Matching
 from cropping import Cropping 
+from upsampling import Upsampling
 
 
 # --- Configuration and Environment Setup ---
@@ -122,6 +124,7 @@ def main():
     tracking_module = Tracking(TRACKING_CONFIG)
     matching_module = Matching(APO_MATCH_CONFIG)
     cropping_module = Cropping(APO_CROP_CONFIG)
+    upsampling_module = Upsampling(UPSAMPLING_CONFIG)
     logger.info("All components initialized. Starting main loop.")
     
     # 7. Main Loop
@@ -220,9 +223,16 @@ def main():
     except Exception as e:
         logger.error(f"Error during Cropping finalization: {e}", exc_info=True)
         
-    logger.info("Pipeline execution finished.")
+    logger.info("Starting post-processing (Upsampling stage).")
+    try:
+        # Call the finalize method to process all saved crops
+        upsampling_module.finalize()
+        logger.info("Upsampling post-processing complete.")
+    except Exception as e:
+        logger.error(f"Error during Upsampling finalization: {e}", exc_info=True)
 
-    logger.info("Pipeline execution finished.")
+
+        logger.info("Pipeline execution finished.")
 
 if __name__ == '__main__':
     main()
