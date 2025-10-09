@@ -10,7 +10,8 @@ from utils import (
     run_tracking, 
     convert_obj_to_track_ids,
     get_btrack_params,
-    plot_track_lengths
+    plot_track_lengths,
+    fill_track_gaps_vectorized
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,8 @@ class Tracking:
             how="left"
         )
         logger.info("\t\tMerged information from BTrack and Stardist.")
+
+        merged_df = fill_track_gaps_vectorized(merged_df.copy())
 
         # -- 5. Convert Masks --
         tracked_masks = convert_obj_to_track_ids(mask_filt, merged_df)
