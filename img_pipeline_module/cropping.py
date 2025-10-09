@@ -491,9 +491,9 @@ class Cropping:
                         num_filtered += 1
                     else:
                         # Save to CROPS_DIR for QC
-                        tiff.imwrite(os.path.join(self.crops_dir, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows.transpose(1, 2, 0))
+                        tiff.imwrite(os.path.join(self.crops_dir, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows[::step].transpose(1, 2, 0))
                         # Save to WINDOW_DIR for ML
-                        tiff.imwrite(os.path.join(window_dir, 'no_apo', f'no_apo_{filename}_{i}.tif'), windows.transpose(1, 2, 0))
+                        tiff.imwrite(os.path.join(window_dir, 'no_apo', f'no_apo_{filename}_{i}.tif'), windows[::step].transpose(1, 2, 0))
                         num_healthy_crops += 1
         
         logger.info(f"\t\tFound {num_healthy_crops} valid crops of healthy cells.")
