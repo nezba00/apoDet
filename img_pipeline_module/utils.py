@@ -525,7 +525,7 @@ def fill_track_gaps_vectorized(df, distance_threshold=50):
 
     # 6. Find the BEST match (minimum distance) for each original gap
     # Sort by distance to ensure the first entry for each gap is the best one
-    valid_matches.sort_values('distance', ascending=True, inplace=True)
+    valid_matches = valid_matches.sort_values('distance', ascending=True)
     # Get the first (and therefore best) match for each original gap index
     best_matches = valid_matches.drop_duplicates(subset=['original_index'])
     
@@ -536,7 +536,7 @@ def fill_track_gaps_vectorized(df, distance_threshold=50):
     )
 
     # 7. Apply the new assignments to the original DataFrame
-    df['track_id'].fillna(assignments, inplace=True)
+    df['track_id'] = df['track_id'].fillna(assignments)
     
     return df
 
