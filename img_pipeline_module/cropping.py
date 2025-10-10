@@ -135,6 +135,9 @@ class Cropping:
         # Initialize tracking variables
         merged_df_long['apoptotic'] = 0
         apo_check_array = np.zeros_like(tracked_masks)
+
+        # Initialize Crop Counter
+        self.track_crop_counter = {}
         
         # --- Run the three main cropping stages ---
         
@@ -205,6 +208,18 @@ class Cropping:
 
 
     # --- Internal Methods for Cropping Stages (Move your logic here) ---
+
+    def _generate_crop_filename(self, filename, class_label, track_id, crop_index):
+        """Generates a standardized, unique filename for a cropped sequence."""
+        
+        # Track ID is only relevant for apo and no_apo
+        track_part = f'_T{int(track_id)}' if track_id is not None else '' 
+        
+        # Crop index ensures uniqueness, formatted as C01, C02, etc.
+        index_part = f'_C{int(crop_index):04d}' # Use 3 digits for high capacity (C001, C999)
+
+        # Example: 'apo_img01_T123_C001.tif' or 'random_img01_C001.tif'
+        return f'{class_label}_{filename}{track_part}{index_part}.tif'
 
     def _crop_apoptotic(self, filename, apo_annotations, merged_df_long, apo_check_array, 
                         imgs, tracked_masks, window_size, target_size, num_frames, 
@@ -332,12 +347,27 @@ class Cropping:
             else:
                 sub_windows = windows[chosen_offset::step]
                 sub_windows = np.asarray(sub_windows)
+
                 if len(sub_windows) == (num_frames // step) + 1:
+                    current_track_id = int(current_track_id)
+
+                    counter_key = (filename, current_track_id)
+
+                    current_idx = self.track_crop_counter.get(counter_key, 0) + 1
+                    self.track_crop_counter[counter_key] = current_idx
+
+                    final_name = self._generate_crop_filename(
+                        filename=filename,
+                        class_label='apo',
+                        track_id=current_track_id,
+                        crop_index=current_idx
+                    )
+
                     # Save to CROPS_DIR for QC
                     tiff.imwrite(os.path.join(self.crops_dir, filename, f'trackID_{current_track_id}.tif'), 
                                  sub_windows.transpose(1, 2, 0))
                     # Save to WINDOW_DIR for ML
-                    tiff.imwrite(os.path.join(window_dir, 'apo', f'apo_{filename}_{i}.tif'), 
+                    tiff.imwrite(os.path.join(window_dir, 'apo', final_name), 
                                  sub_windows.transpose(1, 2, 0))
                     num_apo_crops += 1
                 else:
@@ -354,7 +384,6 @@ class Cropping:
             'apo_wrong_size': num_wrong_size,
             'apo_track_too_short': num_track_too_short
         }
-        # --- End of your APO Cropping Logic Refactored ---
 
 
     def _crop_healthy(self, filename, merged_df_long, apo_check_array, imgs, tracked_masks, 
@@ -454,7 +483,7 @@ class Cropping:
 
                     windows = np.asarray(windows)
                     
-                    # Save all crops for features analysis
+                    # Save data for features analysis
                     tiff.imwrite(os.path.join(self.features_dir, 'raw_images', f'cell_{filename}_{track_id}.tif'), windows)
                     tiff.imwrite(os.path.join(self.features_dir, 'masks', f'cell_{filename}_{track_id}.tif'), np.asarray(mask_windows))
 
@@ -464,15 +493,26 @@ class Cropping:
                                        mean_intensity > self.config['CROP_MEAN_INT_THR'],
                                        mean_solidity < self.config['SOLIDITY_THR']))
                     
+                    counter_key = (filename, track_id)
+                    current_idx = self.track_crop_counter.get(counter_key, 0) + 1
+                    self.track_crop_counter[counter_key] = current_idx
+
+                    final_name = self._generate_crop_filename(
+                        filename=filename,
+                        class_label='no_apo',
+                        track_id=track_id,
+                        crop_index=current_idx
+                    )
+
                     if is_filtered:
-                        tiff.imwrite(os.path.join(self.bad_crops, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows.transpose(1, 2, 0))
+                        tiff.imwrite(os.path.join(self.bad_crops, f'no_apo_{filename}', final_name), windows.transpose(1, 2, 0))
                         rejected_windows += 1
                         num_filtered += 1
                     else:
                         # Save to CROPS_DIR for QC
                         tiff.imwrite(os.path.join(self.crops_dir, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows[::step].transpose(1, 2, 0))
                         # Save to WINDOW_DIR for ML
-                        tiff.imwrite(os.path.join(window_dir, 'no_apo', f'no_apo_{filename}_{i}.tif'), windows[::step].transpose(1, 2, 0))
+                        tiff.imwrite(os.path.join(window_dir, 'no_apo', final_name), windows[::step].transpose(1, 2, 0))
                         num_healthy_crops += 1
         
         logger.info(f"\t\tFound {num_healthy_crops} valid crops of healthy cells.")
@@ -561,11 +601,19 @@ class Cropping:
             required_len = (self.config['MAX_TRACKING_DURATION'] // self.config['FRAME_INTERVAL']) + 1
             if is_valid_sequence and len(windows) == required_len:
                 windows = np.asarray(windows)
+
+                final_name = self._generate_crop_filename(
+                    filename=filename,
+                    class_label='random',
+                    track_id=None,
+                    crop_index=crop_count + 1 # Use the existing crop_count
+                )    
+
                 # Save to CROPS_DIR for QC
                 tiff.imwrite(os.path.join(self.crops_dir, f'random_{filename}', f'ID_{crop_count}.tif'), 
                              windows.transpose(1, 2, 0))
                 # Save to WINDOW_DIR for ML
-                tiff.imwrite(os.path.join(window_dir, 'random', f'random_{filename}_{crop_count}.tif'), 
+                tiff.imwrite(os.path.join(window_dir, 'random', final_name), 
                              windows.transpose(1, 2, 0))
                 crop_count += 1
             
