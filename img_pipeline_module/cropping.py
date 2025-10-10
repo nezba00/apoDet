@@ -363,12 +363,30 @@ class Cropping:
                         crop_index=current_idx
                     )
 
-                    # Save to CROPS_DIR for QC
-                    tiff.imwrite(os.path.join(self.crops_dir, filename, f'trackID_{current_track_id}.tif'), 
-                                 sub_windows.transpose(1, 2, 0))
+                    target_path = os.path.join(window_dir, 'apo', final_name)
+
                     # Save to WINDOW_DIR for ML
-                    tiff.imwrite(os.path.join(window_dir, 'apo', final_name), 
-                                 sub_windows.transpose(1, 2, 0))
+                    tiff.imwrite(target_path, sub_windows.transpose(1, 2, 0))
+
+                    # Create a softlink to allow for human investigation
+                    link_name_for_qc = f'trackID_{current_track_id}.tif'
+                    link_path = os.path.join(self.crops_dir, filename, link_name_for_qc)
+
+                    try:
+                        # Check if a file already exists at the link path (e.g., from a previous run)
+                        if os.path.exists(link_path) or os.path.islink(link_path):
+                            os.remove(link_path)
+                            
+                        # os.symlink(source, link_name)
+                        os.symlink(target_path, link_path)
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to create soft link for {link_name_for_qc}. Error: {e}")
+                        # You might want to log this but continue execution.
+                    
+
+
+
                     num_apo_crops += 1
                 else:
                     logger.warning(f'\t\tWrong size after temporal sampling. Length = {len(windows)}.')
@@ -509,10 +527,25 @@ class Cropping:
                         rejected_windows += 1
                         num_filtered += 1
                     else:
-                        # Save to CROPS_DIR for QC
-                        tiff.imwrite(os.path.join(self.crops_dir, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows[::step].transpose(1, 2, 0))
-                        # Save to WINDOW_DIR for ML
-                        tiff.imwrite(os.path.join(window_dir, 'no_apo', final_name), windows[::step].transpose(1, 2, 0))
+                        target_path = os.path.join(window_dir, 'no_apo', final_name)
+                        tiff.imwrite(target_path, windows.transpose(1, 2, 0))
+
+                        # 2. Define the path for the SOFT LINK (The human-readable QC name)
+                        link_name_for_qc = f'trackID_{track_id}.tif' 
+                        # Link path must include the file-specific 'no_apo' folder you created
+                        link_path = os.path.join(self.crops_dir, f'no_apo_{filename}', link_name_for_qc)
+
+                        # 3. Create the soft link in the CROPS_DIR pointing to the original file
+                        try:
+                            if os.path.exists(link_path) or os.path.islink(link_path):
+                                os.remove(link_path)
+                                
+                            # os.symlink(source, link_name)
+                            os.symlink(target_path, link_path)
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to create soft link for healthy crop {link_name_for_qc}. Error: {e}")
+
                         num_healthy_crops += 1
         
         logger.info(f"\t\tFound {num_healthy_crops} valid crops of healthy cells.")
@@ -609,12 +642,24 @@ class Cropping:
                     crop_index=crop_count + 1 # Use the existing crop_count
                 )    
 
-                # Save to CROPS_DIR for QC
-                tiff.imwrite(os.path.join(self.crops_dir, f'random_{filename}', f'ID_{crop_count}.tif'), 
-                             windows.transpose(1, 2, 0))
-                # Save to WINDOW_DIR for ML
-                tiff.imwrite(os.path.join(window_dir, 'random', final_name), 
-                             windows.transpose(1, 2, 0))
+                target_path = os.path.join(window_dir, 'random', final_name)
+                tiff.imwrite(target_path, windows.transpose(1, 2, 0))
+
+                link_name_for_qc = f'ID_{crop_count}.tif' 
+                
+                link_path = os.path.join(self.crops_dir, f'random_{filename}', link_name_for_qc)
+
+                # 3. Create the soft link in the CROPS_DIR pointing to the original file
+                try:
+                    if os.path.exists(link_path) or os.path.islink(link_path):
+                        os.remove(link_path)
+                        
+                    # os.symlink(source, link_name)
+                    os.symlink(target_path, link_path)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to create soft link for random crop {link_name_for_qc}. Error: {e}")
+
                 crop_count += 1
             
             iter_count += 1
