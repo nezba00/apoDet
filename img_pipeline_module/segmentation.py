@@ -22,7 +22,7 @@ class Segmentation:
         Args:
             config: Dictionary containing segmentation-specific parameters.
         """
-        self.save_data = config['SAVE_DATA']
+        self.save_data = config['SAVE_INTERMEDIATE']
         self.use_gpu = config['USE_GPU']
         self.min_nuc_size_40x = config['MIN_NUC_SIZE']
         self.min_nuc_size_20x = config['MIN_NUC_SIZE_20x']

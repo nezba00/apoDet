@@ -32,8 +32,6 @@ class Tracking:
         self.config = config # Store the full config for dynamic lookup
         
         # Input/Output paths
-        self.mask_dir = config['MASK_DIR']      # Input: Filtered segmentation masks
-        self.df_dir = config['DF_DIR']          # Input: Segmentation summary DataFrames
         self.tracked_mask_dir = config['TRACKED_MASK_DIR'] # Output
         self.track_df_dir = config['TRACK_DF_DIR']       # Output
         self.plot_dir = config['PLOT_DIR']               # Output

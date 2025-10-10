@@ -25,12 +25,6 @@ class Matching:
         """
         self.config = config
         
-        # Input paths (based on previous stages' outputs)
-        self.apo_dir = config['APO_DIR']          # Manual annotations
-        self.details_dir = config['DETAILS_DIR']  # Segmentation details (.pkl)
-        self.mask_dir = config['MASK_DIR']        # Filtered masks (.npz)
-        self.tracked_mask_dir = config['TRACKED_MASK_DIR'] # Tracked masks (.npz)
-        
         # Output paths
         self.csv_dir = config['CSV_DIR']          # Matched annotations output
         self.plot_dir = config['PLOT_DIR']        # Plots output

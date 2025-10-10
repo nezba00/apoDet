@@ -5,114 +5,151 @@ It consolidates settings for:
   2. Cell Tracking and Analysis
   3. Apoptosis Annotation Matching and Evaluation
   4. Apoptosis Window Cropping and Dataset Generation
+  5. Crop Upsampling
 """
 
 from pathlib import Path
 
-# Global settings
-RUN_NAME = "modular_test_1"
+# ==================================
+# GLOBAL & EXTERNAL SETTINGS
+# ==================================
+RUN_NAME = "new_config_test"
 
-# Base directories
+# 1. Base Project Directories (Relative to execution)
 BASE_DATA_DIR = Path("./data") / RUN_NAME
 BASE_LOG_DIR = Path("./logs") / RUN_NAME
 
-# Global directories (common to several modules)
-IMG_DIR = Path("/home/nbahou/myimaging/test_tiffs")     # Path("/mnt/imaging.data/PertzLab/apoDetection/TIFFs")
-MASK_DIR = BASE_DATA_DIR / "apo_masks"
-MASK_DIR_NO_FILT = BASE_DATA_DIR / 'apo_masks_no_filt'
-DF_DIR = BASE_DATA_DIR / "summary_dfs"
-DETAILS_DIR = BASE_DATA_DIR / "details"
-TRACKED_MASK_DIR = BASE_DATA_DIR / "tracked_masks"
-TRACKED_MASK_TIFF = BASE_DATA_DIR / "tracked_masks_tiff"
-TRACK_DF_DIR = BASE_DATA_DIR / "track_dfs"
-MATCH_CSV_DIR = BASE_DATA_DIR / "apo_match_csv"
-PLOT_DIR = BASE_DATA_DIR / "plots"
-LOG_DIR = BASE_LOG_DIR
-
-
-
-
-
-# ---------------------------
-# 1. Nuclear Segmentation
-# ---------------------------
-SEGMENTATION_CONFIG = {
-    'IMG_DIR': IMG_DIR,                             # Input directory for images
-    'MASK_DIR': MASK_DIR,             # Output: Segmentation masks
-    'MASK_DIR_NO_FILT': MASK_DIR_NO_FILT,
-    'DF_DIR': DF_DIR,             # Output: Summary dataframes
-    'DETAILS_DIR': DETAILS_DIR,            # Output: Detailed segmentation results
-    'LOG_DIR': LOG_DIR,                            # Logging directory
-    'SAVE_DATA': True,                              # Whether to save outputs
-    'USE_GPU': True,                                # Enable GPU acceleration if available
-    'MIN_NUC_SIZE': 200,                            # Minimum nuclear size to consider [pixels]
-    'MIN_NUC_SIZE_20x': 100,
-    'EXPERIMENT_INFO': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',  # Experiment metadata
+# 2. External Absolute Paths (Must be manually updated for new environments)
+EXTERNAL_PATHS = {
+    'EXPERIMENT_INFO_CSV': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',
+    'APO_ANNOTATIONS_DIR': '/mnt/imaging.data/PertzLab/apoDetection/ApoptosisAnnotation',
+    'SOURCE_IMAGES_DIR': Path("/home/nbahou/myimaging/test_tiffs/mini"), 
 }
 
-# ---------------------------
+# 3. Centralized Output Directory Names (Single Source of Truth)
+# These are the *names* of the folders inside BASE_DATA_DIR
+OUTPUT_DIRS = {
+    'DETAILS': 'details',
+    'TRACKED_MASKS': 'tracked_masks_tiff',
+    'TRACK_DF': 'track_dfs',
+    'APO_MATCH_CSV': 'apo_match_csv',
+    'PLOTS': 'plots',
+
+    # Segmentation Output Names
+    'MASK_DIR': 'apo_masks',    # maybe better strdst_masks
+    'MASK_DIR_NO_FILT': 'apo_masks_no_filt',
+
+    
+    # Cropping Output Names
+    'WINDOW_CROPS_BASE': 'windows',
+    'WINDOW_CROPS_20X_BASE': 'windows_20x',
+    'WINDOW_CROPS_UPSAMPLED': 'windows_20x_2cat_resize_128',
+    'REJECTED_CROPS': 'bad_crops',
+    'CROPS_DIR': 'apo_crops',
+    'APO_CHECK_ARRAYS': 'apo_check_arrays',
+    'FILTER_FEATURES': 'features_df'
+}
+
+# ==================================
+# 1. Nuclear Segmentation
+# ==================================
+SEGMENTATION_CONFIG = {
+    # External Input
+    'IMG_DIR': EXTERNAL_PATHS['SOURCE_IMAGES_DIR'], 
+    'EXPERIMENT_INFO': EXTERNAL_PATHS['EXPERIMENT_INFO_CSV'],
+    
+    # Output Directories (if saving intermediate files)
+    'MASK_DIR': BASE_DATA_DIR / 'apo_masks',
+    'MASK_DIR_NO_FILT': BASE_DATA_DIR / 'apo_masks_no_filt',
+    'DF_DIR': BASE_DATA_DIR / 'summary_dfs',
+    'DETAILS_DIR': BASE_DATA_DIR / 'details',
+    
+    # Parameters
+    'MIN_NUC_SIZE': 200,
+    'MIN_NUC_SIZE_20x': 100, 
+    'USE_GPU': True, 
+    'SAVE_INTERMEDIATE': True, # New Flag to control saving
+}
+
+# ==================================
 # 2. Cell Tracking and Analysis
-# ---------------------------
+# ==================================
 TRACKING_CONFIG = {
-    'IMG_DIR': IMG_DIR,                             # Input images directory (if needed)
-    'MASK_DIR': MASK_DIR,                # Input segmentation masks (from segmentation pipeline)
-    'DF_DIR': DF_DIR,                # Input summary dataframes from segmentation
-    'TRACKED_MASK_DIR': TRACKED_MASK_DIR,     # Output: Masks with track IDs
-    'TRACK_DF_DIR': TRACK_DF_DIR,            # Output: Track dataframes
-    'PLOT_DIR': PLOT_DIR,                           # Directory to save plots (track length histograms, etc.)
-    'RUN_NAME': RUN_NAME,                             # Name identifier for this run
-    'BT_CONFIG_FILE': "/home/nbahou/myimaging/apoDet/scripts/extras/cell_config.json",    # Config file for the BTrack algorithm
-    'BT_CONFIG_20X': "/home/nbahou/myimaging/apoDet/scripts/extras/cell_config_20x.json",
+    # Output Directories (if saving)
+    'TRACKED_MASK_DIR': BASE_DATA_DIR / OUTPUT_DIRS['TRACKED_MASKS'],
+    'TRACK_DF_DIR': BASE_DATA_DIR / OUTPUT_DIRS['TRACK_DF'],
+    'PLOT_DIR': BASE_DATA_DIR / OUTPUT_DIRS['PLOTS'],
+    
+    # Parameters
+    'RUN_NAME': RUN_NAME,
+    'EXPERIMENT_INFO': EXTERNAL_PATHS['EXPERIMENT_INFO_CSV'],
+    'BT_CONFIG_FILE': "/home/nbahou/myimaging/apoDet/scripts/extras/cell_config.json",
+    'BT_CONFIG_20X': "/home/myimaging/apoDet/scripts/extras/cell_config_20x.json",
     'BT_CONFIG_20X_5t': '/home/nbahou/myimaging/apoDet/scripts/extras/cell_config_5_20x.json',
     'EPS_TRACK': 70,                                # Tracking radius in pixels
     'EPS_TRACK_20x': 30,
-    'TRK_MIN_LEN': 25,                             # Minimum track length in frames
-    'LOG_DIR': LOG_DIR,
-    'EXPERIMENT_INFO': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',  # Experiment metadata
+    'TRK_MIN_LEN': 25, 
+    'SAVE_INTERMEDIATE': True, # We usually want to save the final track data
 }
 
-# ---------------------------
-# 3. Apoptosis Annotation Matching and Evaluation
-# ---------------------------
+# ==================================
+# 3. Apoptosis Annotation Matching
+# ==================================
 APO_MATCH_CONFIG = {
-    'IMG_DIR': IMG_DIR,                             # Used for filename resolution
-    'APO_DIR': '/mnt/imaging.data/PertzLab/apoDetection/ApoptosisAnnotation',  # Manual annotations directory
-    'DETAILS_DIR': DETAILS_DIR,          # Input detailed segmentation results
-    'MASK_DIR': MASK_DIR,           # Input segmentation masks (possibly modified for matching)
-    'TRACKED_MASK_DIR': TRACKED_MASK_DIR,     # Input tracked masks
-    'CSV_DIR': MATCH_CSV_DIR,        # Output CSV combining manual and automated detections
-    'PLOT_DIR': PLOT_DIR,                           # Directory to save distance histograms
-    'RUN_NAME': RUN_NAME,                          # Run identifier for matching evaluation
-    'LOG_DIR':  LOG_DIR,
-    'EXPERIMENT_INFO': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',
+    # External Input
+    'APO_ANNOTATIONS_DIR': EXTERNAL_PATHS['APO_ANNOTATIONS_DIR'], 
+
+    # Output Directories (if saving)
+    'CSV_DIR': BASE_DATA_DIR / OUTPUT_DIRS['APO_MATCH_CSV'],
+    'PLOT_DIR': BASE_DATA_DIR / OUTPUT_DIRS['PLOTS'],
+    
+    # Parameters
+    'RUN_NAME': RUN_NAME,
 }
 
-# ---------------------------
-# 4. Apoptosis Window Cropping and Dataset Generation
-# ---------------------------
+# ==================================
+# 4. Apoptosis Window Cropping
+# ==================================
 APO_CROP_CONFIG = {
-    'IMG_DIR': IMG_DIR,                             # Input images directory
-    'EXPERIMENT_INFO': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',  # Experiment metadata
-    'CSV_DIR': MATCH_CSV_DIR,         # Input CSV from annotation matching
-    'TRACKED_MASK_DIR': TRACKED_MASK_DIR,       # Input tracked masks
-    'TRACK_DF_DIR': TRACK_DF_DIR,              # Input tracking dataframes
-    'CROPS_DIR': BASE_DATA_DIR / 'apo_crops',              # Output: Cropped image series for QC (.tif)
-    'WINDOWS_DIR': BASE_DATA_DIR / 'windows',  # Output: Crops for machine learning (e.g., scDINO)
-    'WINDOWS_DIR_20X': BASE_DATA_DIR / 'windows_20x',
-    'PLOT_DIR': PLOT_DIR,                           # Directory to save survival time histograms, etc.
-    'RUN_NAME': RUN_NAME,                             # Run identifier for cropping
-    'BAD_CROPS': BASE_DATA_DIR / 'bad_crops',
-    'FEATURES_DIR': BASE_DATA_DIR / 'features_df',
-    'TRK_MIN_LEN': 25,                              # Minimum track length in frames (used for filtering)
-    'MAX_TRACKING_DURATION': 20,                    # Maximum tracking duration in minutes
-    'FRAME_INTERVAL': 5,                            # Temporal resolution between frames (in minutes)
-    'WINDOW_SIZE': 48,                              # Size of spatial crops (pixels)
+    # Output Directories (Final Products)
+    'WINDOWS_DIR': BASE_DATA_DIR / OUTPUT_DIRS['WINDOW_CROPS_BASE'],
+    'WINDOWS_DIR_20X': BASE_DATA_DIR / OUTPUT_DIRS['WINDOW_CROPS_20X_BASE'],
+    'CROPS_DIR': BASE_DATA_DIR / OUTPUT_DIRS['CROPS_DIR'],
+    'BAD_CROPS': BASE_DATA_DIR / OUTPUT_DIRS['REJECTED_CROPS'],
+    'FEATURES_DIR': BASE_DATA_DIR / OUTPUT_DIRS['FILTER_FEATURES'],
+    'APO_CHECK_ARRAY_DIR': BASE_DATA_DIR / OUTPUT_DIRS['APO_CHECK_ARRAYS'],
+    'PLOT_DIR': BASE_DATA_DIR / OUTPUT_DIRS['PLOTS'],
+    
+    # Parameters
+    'RUN_NAME': RUN_NAME,
+    'MAX_TRACKING_DURATION': 20,
+    'FRAME_INTERVAL': 5,
+    'WINDOW_SIZE': 48,
     'WINDOW_SIZE_20X': 32,
     'ECCENTRICITY_THR': 0.35,
     'SOLIDITY_THR': 0.925,
     'CROP_STD_THR': 1700,
     'CROP_MEAN_INT_THR': 6500,
-    'LOG_DIR': LOG_DIR,
     'NUM_BLOCKED_FRAMES': 50,
-    'APO_CHECK_ARRAY_DIR': BASE_DATA_DIR / "apo_check_arrays",
+
+}
+
+# ==================================
+# 5. Crop Upsampling (Post-Processing)
+# ==================================
+UPSAMPLING_CONFIG = {
+    'PARENT_DIR': BASE_DATA_DIR,
+    'TARGET_SIZE': (128, 128),
+
+    # INPUT: Dynamically generated from the Cropping output base
+    'INPUT_WINDOW_DIR_BASE': OUTPUT_DIRS['WINDOW_CROPS_20X_BASE'], 
+    # OUTPUT: Dynamically generated from the new output base name
+    'OUTPUT_WINDOW_DIR_BASE': OUTPUT_DIRS['WINDOW_CROPS_UPSAMPLED'],
+
+    'CLASS_MAPPINGS': [
+        # Define mappings using only the final subdirectory name
+        {'NAME': 'apoptotic', 'SUBDIR': 'apo'},
+        {'NAME': 'non_apoptotic', 'SUBDIR': 'no_apo'},
+        # Add 'random' here if needed later: {'NAME': 'random', 'SUBDIR': 'random'},
+    ]
 }

@@ -13,9 +13,12 @@ class Upsampling:
     """Handles post-processing operations like resizing/upsampling saved crops."""
     def __init__(self, config):
         self.config = config
-        self.parent_dir = config.get('PARENT_DIR', '')
+        self.parent_dir = config['PARENT_DIR']
         self.target_size = tuple(config.get('TARGET_SIZE', (128, 128)))
         self.class_mappings = config['CLASS_MAPPINGS']
+
+        self.input_base_dir_name = config['INPUT_WINDOW_DIR_BASE']
+        self.output_base_dir_name = config['OUTPUT_WINDOW_DIR_BASE']
 
     def _resize_dataset(self, input_dir, output_dir, target_size):
         """Internal worker function to resize all images in a directory."""
@@ -47,17 +50,41 @@ class Upsampling:
 
 
     def finalize(self):
+        """
+        Processes all crops across all files. It iterates over class mappings, 
+        constructs the full paths, and calls the resize worker function.
+        """
         logger.info(f"Starting to resize saved crops to {self.target_size} for {len(self.class_mappings)} classes.")
         
-        # Iterate over the configured classes
+        # 1. Define the full, root paths for I/O based on PARENT_DIR and BASE_NAME
+        # self.parent_dir is the full data path (Path object)
+        input_base_path = os.path.join(self.parent_dir, self.input_base_dir_name)
+        output_base_path = os.path.join(self.parent_dir, self.output_base_dir_name)
+        
+        # Ensure the overall output base directory exists
+        os.makedirs(output_base_path, exist_ok=True)
+
+        # 2. Iterate over the configured classes
         for mapping in self.class_mappings:
-            in_dir = os.path.join(self.parent_dir, mapping['IN_SUBDIR'])
-            out_dir = os.path.join(self.parent_dir, mapping['OUT_SUBDIR'])
+            class_subdir = mapping['SUBDIR'] # e.g., 'apo' or 'no_apo'
             class_name = mapping['NAME']
             
-            logger.info(f"Processing class: {class_name}")
+            # 3. Construct the full, specific input and output directory paths
+            # Path: PARENT_DIR / INPUT_BASE_NAME / CLASS_SUBDIR
+            in_dir = os.path.join(input_base_path, class_subdir)
             
-            # Call the worker function with the dynamic paths
+            # Path: PARENT_DIR / OUTPUT_BASE_NAME / CLASS_SUBDIR
+            out_dir = os.path.join(output_base_path, class_subdir)
+
+            # Check if input directory exists before trying to resize
+            if not os.path.isdir(in_dir):
+                logger.warning(f"Input directory not found for class '{class_name}': {in_dir}. Skipping.")
+                continue
+
+            logger.info(f"Processing class: {class_name} ({in_dir} -> {out_dir})")
+            
+            # 4. Call the worker function
+            # (Requires your original _resize_dataset implementation)
             self._resize_dataset(in_dir, out_dir, self.target_size)
     
         logger.info("Upsampling complete!")

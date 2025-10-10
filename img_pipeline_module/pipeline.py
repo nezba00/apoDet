@@ -6,8 +6,10 @@ import pandas as pd
 
 try:
     from config import (
-        RUN_NAME, IMG_DIR, BASE_LOG_DIR, LOG_DIR, BASE_DATA_DIR, PLOT_DIR,
-        SEGMENTATION_CONFIG, TRACKING_CONFIG, APO_MATCH_CONFIG, APO_CROP_CONFIG,
+        RUN_NAME, BASE_DATA_DIR, BASE_LOG_DIR,
+        EXTERNAL_PATHS, OUTPUT_DIRS, 
+        SEGMENTATION_CONFIG, TRACKING_CONFIG,
+        APO_MATCH_CONFIG, APO_CROP_CONFIG,
         UPSAMPLING_CONFIG
     )
 except ImportError:
@@ -62,11 +64,11 @@ def main():
     
     # Use the Experiment Info path from one of the imported config dictionaries.
     # SEGMENTATION_CONFIG is a good place to pull this global path from.
-    GLOBAL_EXPERIMENT_INFO_PATH = SEGMENTATION_CONFIG['EXPERIMENT_INFO']
+    GLOBAL_EXPERIMENT_INFO_PATH = EXTERNAL_PATHS['EXPERIMENT_INFO_CSV']
 
     # 2. Setup Logging
     # LOG_DIR is imported directly.
-    logger = setup_logging(LOG_DIR, "pipeline_main") 
+    logger = setup_logging(BASE_LOG_DIR, "pipeline_main") 
     logger.info("Pipeline starting configuration and environment setup.")
     logger.info(f"Run Name: {RUN_NAME}")
 
@@ -75,7 +77,7 @@ def main():
     
     output_dirs_to_create = [
         # Global Log Dir
-        LOG_DIR, 
+        BASE_LOG_DIR, 
         
         # Segmentation Output Dirs
         SEGMENTATION_CONFIG['MASK_DIR'], SEGMENTATION_CONFIG['MASK_DIR_NO_FILT'],
@@ -111,9 +113,10 @@ def main():
         sys.exit(1)
 
     # 5. Get Image Paths
-    image_paths = get_image_paths(IMG_DIR)
+    img_dir_path = SEGMENTATION_CONFIG['IMG_DIR']
+    image_paths = get_image_paths(img_dir_path)
     filenames = [os.path.splitext(os.path.basename(path))[0] for path in image_paths]
-    logger.info(f"Found {len(filenames)} image files in {IMG_DIR}.")
+    logger.info(f"Found {len(filenames)} image files in {img_dir_path}.")
     
     if not image_paths:
         logger.warning("No images found. Exiting pipeline.")
@@ -132,7 +135,10 @@ def main():
         logger.info(f"--- Running Pipeline for {filename} ---")
 
         try:
-            apo_file = os.path.join(APO_MATCH_CONFIG['APO_DIR'], f'{filename}.csv')
+            apo_file = os.path.join(
+                APO_MATCH_CONFIG['APO_ANNOTATIONS_DIR'], 
+                f'{filename}.csv'
+            )
             # Load annotation file for the current image
             apo_annotations = pd.read_csv(
                 apo_file, 

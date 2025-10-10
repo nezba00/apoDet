@@ -37,34 +37,13 @@ class Cropping:
         ----------
         config : dict
             The APO_CROP_CONFIG dictionary loaded from the main configuration.
-        plot_dir : str
-            The base directory for saving plots.
         """
         self.config = config
         self.plot_dir = config['PLOT_DIR']
         self.run_name = config['RUN_NAME']
-
-        # Cropping Parameters (Moved from global variables)
-        self.trk_min_len = config['TRK_MIN_LEN']
-        self.max_tracking_duration = config['MAX_TRACKING_DURATION']
-        self.frame_interval = config['FRAME_INTERVAL']
-        self.window_size = config['WINDOW_SIZE']
-        self.window_size_20x = config['WINDOW_SIZE_20X']
-
-        # Thresholds (Moved from global variables)
-        self.eccentricity_thr = config['ECCENTRICITY_THR']
-        self.solidity_thr = config['SOLIDITY_THR']
-        self.crop_std_thr = config['CROP_STD_THR']
-        self.crop_mean_int_thr = config['CROP_MEAN_INT_THR']
-        self.num_blocked_frames = config['NUM_BLOCKED_FRAMES']
         
         # Directory Paths (Access via config)
-        self.img_dir = config['IMG_DIR']
-        self.experiment_info = config['EXPERIMENT_INFO']
-        self.csv_dir = config['CSV_DIR'] 
-        self.tracked_mask_dir = config['TRACKED_MASK_DIR']
-        self.track_df_dir = config['TRACK_DF_DIR']
-        self.crops_dir = config['CROPS_DIR'] 
+        self.crops_dir = config['CROPS_DIR']
         self.windows_dir = config['WINDOWS_DIR']
         self.windows_dir_20x = config['WINDOWS_DIR_20X']
         self.bad_crops = config['BAD_CROPS']
@@ -118,27 +97,27 @@ class Cropping:
 
         # 1. Temporal Compatibility Check
         is_valid, result = check_temporal_compatibility(
-            filename, experiments_list, self.frame_interval
+            filename, experiments_list, self.config['FRAME_INTERVAL']
         )
         if not is_valid:
             logger.warning(f"Skipping {filename} due to: {result}")
             return {'status': 'skipped', 'reason': 'temporal_incompatibility'}
 
         acquisition_freq = result
-        step = self.frame_interval // acquisition_freq
-        num_frames = self.max_tracking_duration // acquisition_freq
-        num_timepoints = self.max_tracking_duration // self.frame_interval
+        step = self.config['FRAME_INTERVAL'] // acquisition_freq
+        num_frames = self.config['MAX_TRACKING_DURATION'] // acquisition_freq
+        num_timepoints = self.config['MAX_TRACKING_DURATION'] // self.config['FRAME_INTERVAL']
 
         # 2. Load DataFrames
         track_sizes = merged_df.groupby("track_id")["track_id"].transform('size')
-        required_frames = (self.frame_interval // acquisition_freq) * (num_timepoints + 1)
+        required_frames = (self.config['FRAME_INTERVAL'] // acquisition_freq) * (num_timepoints + 1)
         merged_df_long = merged_df[track_sizes >= required_frames].copy()
         logger.info(f"\tUsing min track length of {required_frames} frames.")
 
         # 3. Magnification and Window Size Setup
         exp_info = get_experiment_info(filename, experiments_list)
         magnification = exp_info.get('magnification', '40x')
-        window_size = self.window_size_20x if magnification == '20x' else self.window_size
+        window_size = self.config['WINDOW_SIZE_20X'] if magnification == '20x' else self.config['WINDOW_SIZE']
         target_size = window_size
         window_dir = self.windows_dir_20x if magnification == '20x' else self.windows_dir
         logger.info(f"\tUsing {window_size} window size for {magnification}")
@@ -273,7 +252,7 @@ class Cropping:
                 annot_y = int(row['y'])
                 annot_t = int(row['correct_t'])
                 window_size_no_match = 2 * window_size
-                num_block_no_match = 2 * self.num_blocked_frames
+                num_block_no_match = 2 * self.config['NUM_BLOCKED_FRAMES']
 
                 block_window_in_array(
                     apo_check_array,
@@ -315,7 +294,7 @@ class Cropping:
                 last_x,
                 last_y,
                 window_size,
-                self.num_blocked_frames,
+                self.config['NUM_BLOCKED_FRAMES'],
                 acquisition_freq
             )    
 
@@ -480,10 +459,10 @@ class Cropping:
                     tiff.imwrite(os.path.join(self.features_dir, 'masks', f'cell_{filename}_{track_id}.tif'), np.asarray(mask_windows))
 
                     # QC Check
-                    is_filtered = any((mean_eccentricity < self.eccentricity_thr,
-                                       mean_std > self.crop_std_thr,
-                                       mean_intensity > self.crop_mean_int_thr,
-                                       mean_solidity < self.solidity_thr))
+                    is_filtered = any((mean_eccentricity < self.config['ECCENTRICITY_THR'],
+                                       mean_std > self.config['CROP_STD_THR'],
+                                       mean_intensity > self.config['CROP_MEAN_INT_THR'],
+                                       mean_solidity < self.config['SOLIDITY_THR']))
                     
                     if is_filtered:
                         tiff.imwrite(os.path.join(self.bad_crops, f'no_apo_{filename}', f'trackID_{track_id}.tif'), windows.transpose(1, 2, 0))
@@ -579,7 +558,7 @@ class Cropping:
                     break # Stop processing this sequence
             
             
-            required_len = (self.max_tracking_duration // self.frame_interval) + 1
+            required_len = (self.config['MAX_TRACKING_DURATION'] // self.config['FRAME_INTERVAL']) + 1
             if is_valid_sequence and len(windows) == required_len:
                 windows = np.asarray(windows)
                 # Save to CROPS_DIR for QC
@@ -678,7 +657,7 @@ class Cropping:
             # --- End of your plot_feature function Refactored ---
             
         # Call plot_feature for each QC metric
-        plot_feature(features_df['eccentricity'], 'eccentricity', self.eccentricity_thr, xlim=(0,1), comparison='<', output_dir=output_dir)
-        plot_feature(features_df['intensity_std'], 'intensity_std', self.crop_std_thr, xlim=(0,3000), comparison='>', output_dir=output_dir)
-        plot_feature(features_df['solidity'], 'solidity', self.solidity_thr, xlim=(0.8,1), comparison='<', output_dir=output_dir)
-        plot_feature(features_df['intensity_mean'], 'intensity_mean', self.crop_mean_int_thr, xlim=(0, 5500), comparison='>', output_dir=output_dir)
+        plot_feature(features_df['eccentricity'], 'eccentricity', self.config['ECCENTRICITY_THR'], xlim=(0,1), comparison='<', output_dir=output_dir)
+        plot_feature(features_df['intensity_std'], 'intensity_std', self.config['CROP_STD_THR'], xlim=(0,3000), comparison='>', output_dir=output_dir)
+        plot_feature(features_df['solidity'], 'solidity', self.config['SOLIDITY_THR'], xlim=(0.8,1), comparison='<', output_dir=output_dir)
+        plot_feature(features_df['intensity_mean'], 'intensity_mean', self.config['CROP_MEAN_INT_THR'], xlim=(0, 5500), comparison='>', output_dir=output_dir)
