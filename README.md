@@ -20,7 +20,19 @@ $$\text{Output Channel } c_i \text{ is the image of the cell at time } t_0 + i \
 
 This diagram illustrates the flow from raw data acquisition through the core preprocessing steps—Segmentation, Tracking, Matching, and Cropping—culminating in the final multi-channel, cell-centered dataset.
 
-![Visual overview of the preprocessing pipeline and its main components](./assets/pipeline_overview.png)
+<br>
+<br>
+
+<div align="center">
+    <img 
+        src="./assets/pipeline_overview.png" 
+        width="60%" 
+        alt="Image Description: Pipeline Visual Overview"
+    />
+</div>
+
+<br>
+
 
 ---
 
@@ -53,19 +65,30 @@ The pipeline was validated on an extensive dataset of **219 TIFF files (~420 GB)
 ### 3. Annotation Matching
 * **Goal:** Robustly link expert-provided coordinate annotations $(x, y, t)$ to the generated tracks for downstream labeling.
 * **Method:** Instead of a distance-based approach, a custom method extracts a **temporal vector** centered on the expert annotation and uses a **majority vote** across surrounding frames to assign a stable track ID. This methodology is not well suited for objects that displace by more than one radius in two timesteps.
-* **Success Rate:** Matching 15,632 expert annotations resulted in a success rate of **$>99\%$ (15,484 matches)**, providing strong external validation of the segmentation and tracking quality.
+* **Success Rate:** Matching 15,632 expert annotations resulted in a success rate of **$>99\\%$ (15,484 matches)**, providing strong external validation of the segmentation and tracking quality.
 * **Time:** The entire matching procedure took approximately **30 minutes** (~0.1 second per annotation).
 
 ### 4. Cropping & Artifact Generation
 * **Final Configuration:** For the downstream scDINO study, the pipeline generated crops of **$32 \times 32$ pixels** with **five temporal channels** spaced evenly across 20 minutes (intervals of five minutes: $t_0, t_5, t_{10}, t_{15}, t_{20}$).
 * **Crop Output & Filtering:**
-    * **Apoptotic Crops:** 9,874 valid crops were generated from 13,764 matches ($\approx 70\%$ crop rate).
-    * **Healthy Crops:** $\approx 300,000$ non-apoptotic crops were initially generated, then filtered using thresholds on features (eccentricity, solidity, intensity) to yield a final count of **258,683 healthy crops**.
-* **Time:** Cropping was completed in $\approx 4.5$ hours ($\approx 70$s per file).
+    * **Apoptotic Crops:** 9,874 valid crops were generated from 13,764 matches (~70% crop rate).
+    * **Healthy Crops:** ~300,000 non-apoptotic crops were initially generated, then filtered using thresholds on features (eccentricity, solidity, intensity) to yield a final count of **258,683 healthy crops**.
+* **Time:** Cropping was completed in ~4.5 hours (~70 s per file).
 
-Preprocessing of the entire dataset was completed in approximately 68 hours in total (18 minutes per file, less than 10 minutes per GB).
+Preprocessing of the entire dataset was completed in imately 68 hours in total (18 minutes per file, less than 10 minutes per GB).
 
-![Example of a single-cell multi-channel crop showing a cell over 5 timepoints](./assets/single_cell_crop_example.png)
+<br>
+<br>
+
+<div align="center">
+    <img 
+        src="./assets/single_cell_crop_example.png" 
+        width="30%" 
+        alt="Image Description: Single-Cell Crop Example"
+    />
+</div>
+
+<br>
 
 ---
 
@@ -81,9 +104,20 @@ The output from this preprocessing pipeline served as the foundation for self-su
 
 This application demonstrates the pipeline's effectiveness in generating training data optimized for state-of-the-art unsupervised representation learning in single-cell microscopy.
 
-![UMAP of scDINO latent space showing clusters of different cell phenotypes and technical artifacts](./assets/example_UMAP.png)
+<br>
+<br>
 
+<div align="center">
+    <img 
+        src="./assets/example_UMAP.png" 
+        width="80%" 
+        alt="Image Description: Example Downstream Application"
+    />
+</div>
 
+<br>
+
+---
 
 ## Citations and Acknowledgements
 
