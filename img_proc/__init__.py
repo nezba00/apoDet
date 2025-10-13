@@ -1,11 +1,11 @@
 # img_pipeline_module/__init__.py
 
 # Import core components
-from .segmentation import Segmentation
-from .tracking import Tracking
-from .matching import Matching
-from .cropping import Cropping
-from .upsampling import Upsampling
+from .segment import Segmentation
+from .track import Tracking
+from .match import Matching
+from .crop import Cropping
+from .upsample import Upsampling
 
 # Import essential utilities to be accessible at the package level
 from .utils import (

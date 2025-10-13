@@ -19,7 +19,7 @@ except ImportError:
 
 
 # Import the necessary functions and classes from our new package
-from img_pipeline_module import(
+from img_proc import(
     Segmentation,
     Tracking,
     Matching,
@@ -37,7 +37,7 @@ def setup_logging(log_dir, module_name):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_path = os.path.join(log_dir, f"{module_name}_{timestamp}.log")
 
-    log_format = "%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s"
+    log_format = "%(asctime)s | %(levelname)-8s | %(name)-17s | %(message)s"
 
     logging.basicConfig(
         level=logging.INFO,
