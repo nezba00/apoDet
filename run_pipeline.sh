@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=test_modular        # Job name
-#SBATCH --output=./slurm_out/modular_%j.out         # Standard output file (%j expands to jobID)
-#SBATCH --error=./slurm_out/modular_%j.err          # Standard error file (%j expands to jobID)
+#SBATCH --output=./slurm_out/new_config_%j.out         # Standard output file (%j expands to jobID)
+#SBATCH --error=./slurm_out/new_config_%j.err          # Standard error file (%j expands to jobID)
 #SBATCH --ntasks=1                  # Run a single task
 #SBATCH --cpus-per-task=16          # 16 CPU cores per task
 #SBATCH --mem=100GB                  # 80GB memory
@@ -19,4 +19,4 @@ source /home/nbahou/miniforge3/etc/profile.d/mamba.sh
 mamba activate ERK_gpu
 
 # Run the Python script
-python ./img_pipeline_module/pipeline.py
+python ./pipeline.py

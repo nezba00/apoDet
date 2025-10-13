@@ -13,7 +13,7 @@ from pathlib import Path
 # ==================================
 # GLOBAL & EXTERNAL SETTINGS
 # ==================================
-RUN_NAME = "new_config_test"
+RUN_NAME = "py_module_test"
 
 # 1. Base Project Directories (Relative to execution)
 BASE_DATA_DIR = Path("./data") / RUN_NAME

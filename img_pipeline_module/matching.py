@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 # Import utilities
-from utils import (
+from .utils import (
     get_experiment_info, # Needed to get acquisition frequency
     match_annotations,
     plot_matching_distances

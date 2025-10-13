@@ -10,11 +10,9 @@ from skimage import measure
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
-from utils import (
+from .utils import (
     check_temporal_compatibility, 
     crop_window,
-    get_image_paths, 
-    load_image_stack, 
     block_window_in_array,
     get_experiment_info
 )

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from stardist.models import StarDist2D
 # We will import the helper functions from our local utils module
-from utils import get_experiment_info, run_segmentation, filter_segmentation
+from .utils import get_experiment_info, run_segmentation, filter_segmentation
 
 logger = logging.getLogger(__name__)
 

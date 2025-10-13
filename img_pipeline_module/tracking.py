@@ -5,7 +5,7 @@ import pandas as pd
 # import sys # Needed for np.load
 
 # Import all tracking and utility helpers
-from utils import (
+from .utils import (
     remove_outlier_frames, 
     run_tracking, 
     convert_obj_to_track_ids,
