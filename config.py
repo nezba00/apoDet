@@ -13,7 +13,7 @@ from pathlib import Path
 # ==================================
 # GLOBAL & EXTERNAL SETTINGS
 # ==================================
-RUN_NAME = "py_module_test"
+RUN_NAME = "new_apo_crop_logic3"
 
 # 1. Base Project Directories (Relative to execution)
 BASE_DATA_DIR = Path("./data") / RUN_NAME
@@ -126,6 +126,7 @@ APO_CROP_CONFIG = {
     'FRAME_INTERVAL': 5,
     'WINDOW_SIZE': 48,
     'WINDOW_SIZE_20X': 32,
+    'CROPS_PER_TRACK_APO': 3,
     'ECCENTRICITY_THR': 0.35,
     'SOLIDITY_THR': 0.925,
     'CROP_STD_THR': 1700,

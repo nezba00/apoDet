@@ -2,6 +2,7 @@
 
 import logging
 import os
+import random
 # import sys
 import numpy as np
 import pandas as pd
@@ -219,35 +220,196 @@ class Cropping:
         # Example: 'apo_img01_T123_C001.tif' or 'random_img01_C001.tif'
         return f'{class_label}_{filename}{track_part}{index_part}.tif'
 
+    def _find_valid_crop_sequences(
+        self,
+        single_cell_df, 
+        step, 
+        required_count,
+        min_x, min_y, max_x, max_y,
+        max_crops_to_extract=-1
+    ):
+        """
+        Finds the first valid temporal offset that yields a complete sequence of 
+        'required_count' frames, where every frame's (x, y) coordinates fall within 
+        the spatial boundary limits (min/max_x/y).
+
+        Returns:
+        - valid_crops: List with DataFrames with the validated rows. Empty if no valid series is found.
+        """
+
+        track_id = single_cell_df['track_id'].iloc[0] if not single_cell_df.empty else "N/A"
+
+        present_time_points = set(single_cell_df['t'].unique())
+        min_t, max_t = single_cell_df['t'].min(), single_cell_df['t'].max()
+
+
+        # available_track_length = len(single_cell_df)
+        time_span_needed = (required_count - 1) * step
+
+        
+        valid_crops = []
+        num_spatial_rejections = 0
+        num_temporal_rejections = 0
+
+        # Pre-check for minimum length
+        if (max_t - min_t) < time_span_needed:
+            print(f"\t\t[Track {track_id} Validation] FAILED: Time span ({max_t - min_t}) is shorter than required span ({time_span_needed}).")
+            results_dict = {'track_too_short': True, 
+                            'num_spatial_rejections': num_spatial_rejections,
+                            'num_temporal_rejections': num_temporal_rejections
+                        }
+            return [], results_dict
+
+        # extract all valid t0 so that we do not run into an indexing error
+        possible_t0_list = sorted([
+            t for t in present_time_points if (t + time_span_needed) <= max_t
+        ])
+
+        for start_t in possible_t0_list:
+            required_time_points = list(range(start_t, start_t + time_span_needed + 1, step))
+
+            is_temporally_consistent = all(t in present_time_points for t in required_time_points)
+
+            if not is_temporally_consistent:
+                # print(f"\t\t[Track {track_id} Validation] Start Time {start_t} FAILED: Temporal consistency violated (missing frame(s) in the sequence).")
+                num_temporal_rejections += 1
+                continue
+
+            # Extract rows based on 't'
+            potential_rows_df = single_cell_df[single_cell_df['t'].isin(required_time_points)]
+            
+            if len(potential_rows_df) != required_count:
+                # This indicates a severe bug in the time-point mapping if it triggers
+                print(f"CRITICAL: Length mismatch after consistency check for t={start_t}")
+                continue
+
+
+            # Check if all x-coordinates are within the horizontal boundary
+            x_valid = (
+                (potential_rows_df['x'] >= min_x) & 
+                (potential_rows_df['x'] <= max_x)
+            ).all()
+            
+            # Check if all y-coordinates are within the vertical boundary
+            y_valid = (
+                (potential_rows_df['y'] >= min_y) & 
+                (potential_rows_df['y'] <= max_y)
+            ).all()
+
+            if x_valid and y_valid:
+                # Found a valid temporal and spatial alignment!
+                valid_crops.append(potential_rows_df.copy())
+                if max_crops_to_extract != -1 and len(valid_crops) >= max_crops_to_extract:
+                    results_dict = {'track_too_short': False, 
+                            'num_spatial_rejections': num_spatial_rejections,
+                            'num_temporal_rejections': num_temporal_rejections
+                        }
+                    return valid_crops, results_dict
+            else:
+                num_spatial_rejections += 1
+                # print(f"\t\t[Track {track_id} Validation] start time {start_t} FAILED: Spatial boundaries violated for at least one frame.")
+                
+        # If the loop completes without finding a valid sequence
+        if not valid_crops:
+            num_starts_checked = len(possible_t0_list)
+            print(
+                f"\t\t[Track {track_id} Validation] FAILED: Exhausted all {num_starts_checked} "
+                f"start indices (Spatial Rej: {num_spatial_rejections}, Temporal Rej: {num_temporal_rejections})."
+            )
+            # print(f"\t\t[Track {track_id} Validation] FAILED: Exhausted all {num_starts_checked} possible start indices; no valid series found.")
+        
+        results_dict = {'track_too_short': False, 
+                        'num_spatial_rejections': num_spatial_rejections,
+                        'num_temporal_rejections': num_temporal_rejections
+                    }
+        return valid_crops, results_dict
+
+    def _sample_valid_crops(
+        self, 
+        valid_crops_list, 
+        max_crops_limit, 
+        prioritize_first=False
+    ):
+        """
+        Samples a subset of crop sequences from the list based on a limit and strategy.
+
+        Args:
+            valid_crops_list (list): List of DataFrames (the valid crop sequences).
+            max_crops_limit (int): The maximum number of crops to return. Use -1 to take all.
+            prioritize_first (bool): If True, index 0 is guaranteed to be included
+                                    (used for APO tracks). If False, sampling is purely random.
+
+        Returns:
+            list: A subset of sampled DataFrames.
+        """
+        list_length = len(valid_crops_list)
+        
+        if list_length == 0:
+            return []
+
+        # 1. Determine the actual number of samples to take
+        # If limit is -1 or greater than list length, take all available.
+        if max_crops_limit == -1 or max_crops_limit > list_length:
+            n_samples = list_length
+        else:
+            n_samples = max_crops_limit
+
+        # Handle the case where the limit is 0 (though less likely)
+        if n_samples == 0:
+            return []
+
+        # 2. Determine the sampling indices based on strategy
+        if prioritize_first:
+            # Strategy A: APO - Always include index 0, sample N-1 from the rest.
+            
+            # If n_samples is 1, random.sample will correctly return an empty list.
+            # If n_samples > 1, sample n_samples - 1 from the remaining indices.
+            other_indices = random.sample(range(1, list_length), n_samples - 1)
+            indices = [0] + other_indices
+        else:
+            # Strategy B: Healthy - Purely random sample of N indices from the whole list.
+            indices = random.sample(range(list_length), n_samples)
+        
+        # Sort the indices for consistent processing order
+        indices.sort()
+        
+        # 3. Create and return the sampled list
+        return [valid_crops_list[i] for i in indices]
+
+
     def _crop_apoptotic(self, filename, apo_annotations, merged_df_long, apo_check_array, 
                         imgs, tracked_masks, window_size, target_size, num_frames, 
                         step, acquisition_freq, window_dir):
         """Logic for cropping apoptotic cells."""
-        # This is where the first section of your main loop logic goes.
-        # It needs to return a dictionary of metrics and the apo_track_ids DataFrame.
-        # ... (Your apo cropping logic goes here, refactored to use 'self' for parameters) ...
-        # NOTE: For brevity, I am omitting the body of this huge function, 
-        # but you should copy/paste your existing logic into this method, 
-        # replacing global variables and configurations with 'self.variable' 
-        # and passing necessary arguments.
-
-        # Example replacement:
-        # Before: 
-        # if len(single_cell_df) < num_frames + 1:
-        #     logger.debug(...)
-        # After:
-        # if len(single_cell_df) < num_frames + 1:
-        #     logger.debug(...)
-        
-        # --- Start of your APO Cropping Logic Refactored ---
+        # --- Metrics Setup ---
         num_apo_crops = 0
         num_no_match = 0
         num_wrong_size = 0
         num_track_too_short = 0
+        num_skipped_tracks = 0
+        successful_track_ids = set()
+
+        # --- Configuration Access ---
+        NUM_BLOCKED_FRAMES = self.config['NUM_BLOCKED_FRAMES']
+        CROPS_PER_TRACK_APO = self.config['CROPS_PER_TRACK_APO']
+        MIN_REQUIRED_LENGTH = (num_frames // step) + 1
 
         apo_track_ids = pd.DataFrame(columns=['track_id', 'apo_start_t'])
 
+
+        # Calculate safe zone to extract crops from
+        h_img, w_img = imgs[0].shape[:2]
+        margin = window_size // 2
+
+        min_x = margin
+        min_y = margin
+        max_x = w_img - margin - 1
+        max_y = h_img - margin - 1
+
+
         logger.info("\tStarting cropping for apo cells")
+
+        # --- Main Loop (Processing Annotations) ---
         for i, row in tqdm(apo_annotations.iterrows(),
                            total=len(apo_annotations),
                            desc="Processing Annotations"):
@@ -260,6 +422,7 @@ class Cropping:
             if not np.isscalar(current_track_id):
                 current_track_id = current_track_id.iloc[0]
 
+            # 1. Handle No Match (Track ID == 0) and Block
             if current_track_id == 0:
                 annot_x = int(row['x'])
                 annot_y = int(row['y'])
@@ -268,32 +431,28 @@ class Cropping:
                 num_block_no_match = 2 * self.config['NUM_BLOCKED_FRAMES']
 
                 block_window_in_array(
-                    apo_check_array,
-                    annot_t,
-                    annot_x,
-                    annot_y,
-                    window_size_no_match,
-                    num_block_no_match,
+                    apo_check_array, annot_t, annot_x, annot_y,
+                    window_size_no_match, num_block_no_match,
                     acquisition_freq
                 )
                 logger.debug("\t\tSkipping annotation, no match found.")
                 num_no_match += 1
                 continue
 
+            # 2. Extract Single Track Data
             is_correct_track = merged_df_long['track_id'] == current_track_id
             is_valid_time = merged_df_long['t'] >= current_t
-            single_cell_df = merged_df_long.loc[is_correct_track & is_valid_time]
+            single_cell_df = merged_df_long.loc[is_correct_track & is_valid_time].copy()
             
             if single_cell_df.empty:
                 logger.warning(f"Track: {current_track_id} not found in csv.")
                 continue
 
-            # Count track length after manual apoptosis annotation
+            # Update Global State (mark cells as apo in df + update stats)
+            merged_df_long.loc[is_correct_track & is_valid_time, 'apoptotic'] = 1
             num_entries = single_cell_df.shape[0]
             self.survival_times.append(num_entries)
-
-            # Mark cells as apoptotic
-            merged_df_long.loc[is_correct_track & is_valid_time, 'apoptotic'] = 1
+            
             
             # Block window in apo_check_array
             last_row = single_cell_df.iloc[-1]
@@ -302,105 +461,107 @@ class Cropping:
             last_t = int(last_row['t'])
 
             block_window_in_array(
-                apo_check_array,
-                last_t,
-                last_x,
-                last_y,
-                window_size,
-                self.config['NUM_BLOCKED_FRAMES'],
+                apo_check_array, last_t, last_x, last_y,
+                window_size, NUM_BLOCKED_FRAMES,
                 acquisition_freq
-            )    
+            )
 
-            if len(single_cell_df) < num_frames + 1:
-                logger.debug(f"\t\tSkipping track: {current_track_id}. Track lost too quickly. len = {len(single_cell_df)}")
-                num_track_too_short += 1
+            # 3. Find Valid Sequences
+            valid_crops_list, status_dict = self._find_valid_crop_sequences(
+                single_cell_df,
+                step,
+                MIN_REQUIRED_LENGTH,
+                min_x, min_y, max_x, max_y,
+                max_crops_to_extract=-1 # Crucial: Find ALL sequences
+            )
+
+            num_wrong_size += status_dict['num_spatial_rejections']
+
+            if not valid_crops_list:
+                logger.debug(f"\t\tSkipping track: {current_track_id}. Reason: No valid crops found (Track too short/spatial bounds failed).")
+                num_skipped_tracks += 1
+                if status_dict['track_too_short']:
+                    num_track_too_short += 1
                 continue
 
-            upper_t_limit = current_t + num_frames + step
-            single_cell_df = single_cell_df.loc[single_cell_df['t'] < upper_t_limit]
+            # 4. Sample Crops (Prioritize the sequence starting closest to APO event)
+            sampled_crops_list = self._sample_valid_crops(
+                valid_crops_list, 
+                CROPS_PER_TRACK_APO, 
+                prioritize_first=True
+            )
 
-            windows = []
-            for _, sc_row in single_cell_df.iterrows():
-                window = crop_window(imgs[int(sc_row['t'])],
-                                     int(sc_row['x']),
-                                     int(sc_row['y']),
-                                     window_size)
-                if window.shape == (target_size, target_size):
-                    windows.append(window)
-                else:
-                    windows.append(None)
+            if not sampled_crops_list:
+                continue
 
-            chosen_offset = None
-            for offset in range(step):
-                sub_windows = windows[offset::step]
-                all_frames_valid = all(x is not None for x in sub_windows)
-                enough_frames = (len(sub_windows) == (num_frames // step) + 1)
-                if all_frames_valid and enough_frames:
-                    chosen_offset = offset
-                    break
+            successful_track_ids.add(current_track_id)
 
-            if chosen_offset is None:
-                logger.debug("\t\tAt least one of the windows does not have the correct size or sequence.")
-                num_wrong_size += 1
-            else:
-                sub_windows = windows[chosen_offset::step]
-                sub_windows = np.asarray(sub_windows)
-
-                if len(sub_windows) == (num_frames // step) + 1:
-                    current_track_id = int(current_track_id)
-
-                    counter_key = (filename, current_track_id)
-
-                    current_idx = self.track_crop_counter.get(counter_key, 0) + 1
-                    self.track_crop_counter[counter_key] = current_idx
-
-                    final_name = self._generate_crop_filename(
-                        filename=filename,
-                        class_label='apo',
-                        track_id=current_track_id,
-                        crop_index=current_idx
+            # 5. Extract and Save Sampled Crops
+            for crop_idx_in_track, positions_to_crop_df in enumerate(sampled_crops_list):
+                windows = []
+                
+                # Extract and check window dimensions (size check is redundant if _find... is perfect)
+                for _, sc_row in positions_to_crop_df.iterrows():
+                    window = crop_window(
+                        imgs[int(sc_row['t'])],
+                        int(sc_row['x']),
+                        int(sc_row['y']),
+                        window_size
                     )
+                    windows.append(window)
 
-                    target_path = os.path.join(window_dir, 'apo', final_name)
+                # Assert final sequence length and size (Redundant but safe debug check)
+                assert len(windows) == MIN_REQUIRED_LENGTH and all(w.shape == (target_size, target_size) for w in windows), \
+                    "CRITICAL ERROR: Sequence validation failed after sampling!"
+                
+                sub_windows = np.asarray(windows)
+                current_track_id = int(current_track_id)
 
-                    # Save to WINDOW_DIR for ML
-                    tiff.imwrite(target_path, sub_windows.transpose(1, 2, 0))
+                # --- File Naming and Saving ---
+                # Update counter for unique filename generation
+                counter_key = (filename, current_track_id)
+                current_idx = self.track_crop_counter.get(counter_key, 0) + 1
+                self.track_crop_counter[counter_key] = current_idx
 
-                    # Create a softlink to allow for human investigation
-                    link_name_for_qc = f'trackID_{current_track_id}.tif'
-                    link_path = os.path.join(self.crops_dir, filename, link_name_for_qc)
+                final_name = self._generate_crop_filename(
+                    filename=filename,
+                    class_label='apo',
+                    track_id=current_track_id,
+                    crop_index=current_idx
+                )
 
-                    try:
-                        # Check if a file already exists at the link path (e.g., from a previous run)
-                        if os.path.exists(link_path) or os.path.islink(link_path):
-                            os.remove(link_path)
-                            
-                        # os.symlink(source, link_name)
-                        os.symlink(target_path, link_path)
-                        
-                    except Exception as e:
-                        logger.error(f"Failed to create soft link for {link_name_for_qc}. Error: {e}")
-                        # You might want to log this but continue execution.
-                    
+                target_path = os.path.join(window_dir, 'apo', final_name)
+                tiff.imwrite(target_path, sub_windows.transpose(1, 2, 0))
 
+                # --- Softlink Creation (Omitted for brevity, but use your existing logic) ---
+                link_name_for_qc = f'trackID_{current_track_id}.tif'
+                link_path = os.path.join(self.crops_dir, filename, link_name_for_qc)
+                
+                try:
+                    if os.path.exists(link_path) or os.path.islink(link_path):
+                        os.remove(link_path)
+                    os.symlink(target_path, link_path)
+                except Exception as e:
+                    logger.error(f"Failed to create soft link for {link_name_for_qc}. Error: {e}")
 
-
-                    num_apo_crops += 1
-                else:
-                    logger.warning(f'\t\tWrong size after temporal sampling. Length = {len(windows)}.')
-        
-        logger.info(f"\t\tValid crops of apo cells found for {num_apo_crops}/{len(apo_annotations)}")
+                num_apo_crops += 1
+                
+        # --- Logging and Return ---
+        num_successful_tracks = len(successful_track_ids)
+        logger.info(f"\t\tValid crops of apo cells found for {num_apo_crops} crops from {num_successful_tracks}/{len(apo_annotations)} tracks.")
         logger.info(f"\t\tNum annotations with no match: {num_no_match}")
-        logger.info(f"\t\tNum wrong size after cropping: {num_wrong_size}")
         logger.info(f"\t\tNum tracks too short: {num_track_too_short}")
-        
+        logger.info(f"\t\tNum tracks skipped (spatial/temporal): {num_skipped_tracks}")
+
         return apo_track_ids, {
             'num_apo_crops': num_apo_crops,
+            'apo_tracks_successful': num_successful_tracks,
             'apo_no_match': num_no_match,
             'apo_wrong_size': num_wrong_size,
-            'apo_track_too_short': num_track_too_short
+            'apo_track_too_short': num_track_too_short,
+            'apo_tracks_skipped': num_skipped_tracks
         }
-
+        
 
     def _crop_healthy(self, filename, merged_df_long, apo_check_array, imgs, tracked_masks, 
                       window_size, target_size, num_frames, step, window_dir):
@@ -563,8 +724,7 @@ class Cropping:
             'healthy_filtered_qc': num_filtered
         }
         # --- End of your Healthy Cropping Logic Refactored ---
-        
-        
+          
     def _crop_random(self, filename, num_apo_crops, apo_track_ids, apo_check_array, 
                      imgs, tracked_masks, window_size, target_size, num_frames, 
                      step, window_dir):
@@ -670,7 +830,8 @@ class Cropping:
         }
         # --- End of your Random Cropping Logic Refactored ---
 
-    # --- Internal Methods for Plotting (Extracted from your final block) ---
+
+    # --- Internal Methods for Plotting ---
     def _plot_survival_times(self, output_dir):
         """Generates and saves the survival times histogram."""
         if not self.survival_times:
