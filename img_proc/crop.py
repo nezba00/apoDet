@@ -186,7 +186,7 @@ class Cropping:
         output_dir = os.path.join(self.plot_dir, self.run_name)
         
         if not self.all_features:
-            logger.warning("No features collected for plotting/saving. Skipping finalization.")
+            logger.info("No features for plotting/saving. Check config if you need them.")
             return
 
         features_df = pd.DataFrame(self.all_features)
@@ -583,6 +583,7 @@ class Cropping:
             CROPS_PER_TRACK_HEALTHY = self.config['CROPS_PER_TRACK_HEALTHY']
             
             # QC parameters
+            ENABLE_QC = self.config['ENABLE_QC']
             ECCENTRICITY_THR = self.config['ECCENTRICITY_THR']
             CROP_STD_THR = self.config['CROP_STD_THR']
             CROP_MEAN_INT_THR = self.config['CROP_MEAN_INT_THR']
@@ -653,17 +654,18 @@ class Cropping:
             if not sampled_crops_list:
                 continue
 
-            # --- 4c. Extract and Save Sampled Crops ---
+            # --- 4c. Extract Sampled Crops ---
             for positions_to_crop_df in sampled_crops_list:
                 windows = []
                 mask_windows = []
                 is_blocked_crop = False
                 crop_start_t = positions_to_crop_df['t'].min()
 
+                # --- Create Single-Cell Crop ---
                 for _, sc_row in positions_to_crop_df.iterrows():
                     current_t, current_x, current_y = int(sc_row['t']), int(sc_row['x']), int(sc_row['y'])
                     
-                    # --- Blocking Check ---
+                    # Blocking Check
                     apo_window = crop_window(apo_check_array[current_t], current_x, current_y, window_size)
                     if np.any(apo_window == 1):
                         logger.debug(f"\t\tTrack {track_id}, crop at t={crop_start_t} blocked by nearby apoptosis.")
@@ -671,7 +673,7 @@ class Cropping:
                         is_blocked_crop = True
                         break # Exit inner frame loop for this crop
 
-                    # --- Crop (Spatial safety is pre-validated) ---
+                    # Crop (Spatial safety is pre-validated)
                     window = crop_window(imgs[current_t], current_x, current_y, window_size)
                     mask_window = crop_window(tracked_masks[current_t], current_x, current_y, window_size)
             
@@ -682,42 +684,17 @@ class Cropping:
                     mask_windows.append(mask_window)
 
                 if is_blocked_crop:
-                    continue # Move to the next sampled crop
+                    continue # Move to the next sampled position if blocked
 
-                # --- Final Validation (Sanity Check) ---
+                # Check if crop dimensions match requirements
                 enough_frames = len(windows) == MIN_REQUIRED_LENGTH
                 all_frames_correct_size = all(w.shape == expected_shape for w in windows)
-                
+        
                 if not enough_frames or not all_frames_correct_size:
                     logger.warning(f"CRITICAL: Post-validation failed for non-apo track {track_id}!")
                     continue
 
-                # --- 5d. Feature Calculation ---
-                current_features = []
-                for mask, img in zip(mask_windows, windows):
-                    try:
-                        props = measure.regionprops_table(mask, img, properties=['label', 'eccentricity',
-                                                                                    'intensity_mean', 'intensity_std',
-                                                                                    'solidity'])
-                        feature_df = pd.DataFrame(props)
-                        if not feature_df.empty:
-                            current_features.append(feature_df)
-                    except Exception as e:
-                        logger.warning(f"Feature extraction failed for track {track_id} at t={crop_start_t}. Error: {e}")
-                
-                if not current_features:
-                    logger.debug(f"No features found for track {track_id} at t={crop_start_t} (e.g., empty mask). Skipping.")
-                    continue
-
-                track_features = pd.concat(current_features, ignore_index=True)
-                track_features['x'] = single_cell_df['x'].iloc[0]
-                track_features['y'] = single_cell_df['y'].iloc[0]
-                track_features['t'] = crop_start_t
-                mean_features = track_features.mean()
-                
-                windows = np.asarray(windows)
-
-                # --- 5e. File Naming and Saving ---
+                # Generate a unique filename for saving
                 counter_key = (filename, track_id, 'no_apo')
                 current_idx = self.track_crop_counter.get(counter_key, 0) + 1
                 self.track_crop_counter[counter_key] = current_idx
@@ -729,24 +706,50 @@ class Cropping:
                     crop_index=current_idx
                 )
 
-                mean_features['filename'] = final_name
-                self.all_features.append(mean_features)
+                # --- 5d. Feature Calculation and Filtering ---
+                if ENABLE_QC:
+                    current_features = []
+                    for mask, img in zip(mask_windows, windows):
+                        props = measure.regionprops_table(mask, img, properties=['label', 'eccentricity',
+                                                                                    'intensity_mean', 'intensity_std',
+                                                                                    'solidity'])
+                        feature_df = pd.DataFrame(props)
+                        if not feature_df.empty:
+                            current_features.append(feature_df)
+                        
+                    if not current_features:
+                        logger.debug(f"No features found for track {track_id} at t={crop_start_t} (e.g., empty mask). Skipping.")
+                        continue
 
-                # TODO: Save feature data? Maybe not necessary
-                tiff.imwrite(os.path.join(self.features_dir, 'raw_images', final_name), windows)
-                tiff.imwrite(os.path.join(self.features_dir, 'masks', final_name), np.asarray(mask_windows))
+                    track_features = pd.concat(current_features, ignore_index=True)
+                    track_features['x'] = single_cell_df['x'].iloc[0]
+                    track_features['y'] = single_cell_df['y'].iloc[0]
+                    track_features['t'] = crop_start_t
+                    mean_features = track_features.mean()
 
-                # --- 5f. QC Check (Unique to healthy logic) ---
-                # TODO: Make optional
-                mean_eccentricity = mean_features['eccentricity']
-                mean_intensity = mean_features['intensity_mean']
-                mean_std = mean_features['intensity_std']
-                mean_solidity = mean_features['solidity']
+                    mean_features['filename'] = final_name
+                    self.all_features.append(mean_features)
 
-                is_filtered = any((mean_eccentricity < ECCENTRICITY_THR,
-                                    mean_std > CROP_STD_THR,
-                                    mean_intensity > CROP_MEAN_INT_THR,
-                                    mean_solidity < SOLIDITY_THR))
+                    mean_eccentricity = mean_features['eccentricity']
+                    mean_intensity = mean_features['intensity_mean']
+                    mean_std = mean_features['intensity_std']
+                    mean_solidity = mean_features['solidity']
+
+                    is_filtered = any((mean_eccentricity < ECCENTRICITY_THR,
+                                        mean_std > CROP_STD_THR,
+                                        mean_intensity > CROP_MEAN_INT_THR,
+                                        mean_solidity < SOLIDITY_THR))
+                    
+                    # TODO: Save feature data? Maybe not necessary
+                    tiff.imwrite(os.path.join(self.features_dir, 'raw_images', final_name), windows)
+                    tiff.imwrite(os.path.join(self.features_dir, 'masks', final_name), np.asarray(mask_windows))
+                else:
+                    is_filtered = False
+                
+                
+
+                # --- 5e. File Saving ---
+                windows = np.asarray(windows)
 
                 if is_filtered:
                     tiff.imwrite(os.path.join(self.bad_crops, f'no_apo_{filename}', final_name), windows.transpose(1, 2, 0))

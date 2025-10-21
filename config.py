@@ -128,6 +128,8 @@ APO_CROP_CONFIG = {
     'WINDOW_SIZE_20X': 32,
     'CROPS_PER_TRACK_APO': 3,
     'CROPS_PER_TRACK_HEALTHY': 2,
+    # Filtering
+    'ENABLE_QC': False,
     'ECCENTRICITY_THR': 0.35,
     'SOLIDITY_THR': 0.925,
     'CROP_STD_THR': 1700,
