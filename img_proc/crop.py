@@ -117,7 +117,6 @@ class Cropping:
         exp_info = get_experiment_info(filename, experiments_list)
         magnification = exp_info.get('magnification', '40x')
         window_size = self.config['WINDOW_SIZE_20X'] if magnification == '20x' else self.config['WINDOW_SIZE']
-        target_size = window_size
         window_dir = self.windows_dir_20x if magnification == '20x' else self.windows_dir
         logger.info(f"\tUsing {window_size} window size for {magnification}")
 
@@ -147,7 +146,7 @@ class Cropping:
         apo_track_ids, apo_metrics = self._crop_apoptotic(
             filename, apo_annotations, merged_df_long, 
             apo_check_array, imgs, tracked_masks, 
-            window_size, target_size, num_frames, step, acquisition_freq, window_dir
+            window_size, num_frames, step, acquisition_freq, window_dir
         )
         metrics.update(apo_metrics)
         num_apo_crops = apo_metrics['num_apo_crops']
@@ -155,7 +154,7 @@ class Cropping:
         # 6. Non-Apoptotic (Healthy) Cell Cropping
         no_apo_metrics = self._crop_healthy(
             filename, merged_df_long, apo_check_array, imgs, tracked_masks, 
-            window_size, target_size, num_frames, step, window_dir
+            window_size, num_frames, step, window_dir
         )
         metrics.update(no_apo_metrics)
         
@@ -163,7 +162,7 @@ class Cropping:
         random_metrics = self._crop_random(
             filename, num_apo_crops, apo_track_ids, 
             apo_check_array, imgs, tracked_masks, 
-            window_size, target_size, num_frames, step, window_dir
+            window_size, num_frames, step, window_dir
         )
         metrics.update(random_metrics)
 
@@ -378,7 +377,7 @@ class Cropping:
 
 
     def _crop_apoptotic(self, filename, apo_annotations, merged_df_long, apo_check_array, 
-                        imgs, tracked_masks, window_size, target_size, num_frames, 
+                        imgs, tracked_masks, window_size, num_frames, 
                         step, acquisition_freq, window_dir):
         """Logic for cropping apoptotic cells."""
         # --- Metrics Setup ---
@@ -511,7 +510,7 @@ class Cropping:
                     windows.append(window)
 
                 # Assert final sequence length and size (Redundant but safe debug check)
-                assert len(windows) == MIN_REQUIRED_LENGTH and all(w.shape == (target_size, target_size) for w in windows), \
+                assert len(windows) == MIN_REQUIRED_LENGTH and all(w.shape == (window_size, window_size) for w in windows), \
                     "CRITICAL ERROR: Sequence validation failed after sampling!"
                 
                 sub_windows = np.asarray(windows)
@@ -519,7 +518,7 @@ class Cropping:
 
                 # --- File Naming and Saving ---
                 # Update counter for unique filename generation
-                counter_key = (filename, current_track_id)
+                counter_key = (filename, current_track_id, 'apo')
                 current_idx = self.track_crop_counter.get(counter_key, 0) + 1
                 self.track_crop_counter[counter_key] = current_idx
 
@@ -533,8 +532,8 @@ class Cropping:
                 target_path = os.path.join(window_dir, 'apo', final_name)
                 tiff.imwrite(target_path, sub_windows.transpose(1, 2, 0))
 
-                # --- Softlink Creation (Omitted for brevity, but use your existing logic) ---
-                link_name_for_qc = f'trackID_{current_track_id}.tif'
+                # --- Softlink Creation ---
+                link_name_for_qc = f'trackID_{current_track_id}_crop_{current_idx}.tif'
                 link_path = os.path.join(self.crops_dir, filename, link_name_for_qc)
                 
                 try:
@@ -564,175 +563,238 @@ class Cropping:
         
 
     def _crop_healthy(self, filename, merged_df_long, apo_check_array, imgs, tracked_masks, 
-                      window_size, target_size, num_frames, step, window_dir):
-        """Logic for cropping non-apoptotic (healthy) cells."""
-        # This is where the second section of your main loop logic goes.
-        # ... (Your healthy cropping logic goes here) ...
+                      window_size, num_frames, step, window_dir):
+        """
+        Logic for cropping non-apoptotic (healthy) cells using a
+        pre-validation and sampling strategy.
         
-        # --- Start of your Healthy Cropping Logic Refactored ---
+        1. Finds all spatially valid crop windows for each track.
+        2. Samples a configured number of crops from these valid windows.
+        3. Performs a final check for blocking by nearby apoptotic cells.
+        4. Calculates features, performs QC, and saves valid crops.
+        """
+        
+
+
         logger.info('\tStarting cropping for non-apo cells.')
+    
+        # --- 1. Configuration Access ---
+        try:
+            CROPS_PER_TRACK_HEALTHY = self.config['CROPS_PER_TRACK_HEALTHY']
+            
+            # QC parameters
+            ECCENTRICITY_THR = self.config['ECCENTRICITY_THR']
+            CROP_STD_THR = self.config['CROP_STD_THR']
+            CROP_MEAN_INT_THR = self.config['CROP_MEAN_INT_THR']
+            SOLIDITY_THR = self.config['SOLIDITY_THR']
+        except KeyError as e:
+            logger.error(f"Missing required config parameter for healthy cropping: {e}")
+            raise
+
+        # Calculate MIN_REQUIRED_LENGTH exactly as done in _crop_apoptotic
+        MIN_REQUIRED_LENGTH = (num_frames // step) + 1
+        
+        # --- 2. Calculate Safe Zone ---
+        # Replicates the exact logic from _crop_apoptotic
+        h_img, w_img = imgs[0].shape[:2]
+        margin = window_size // 2
+
+        min_x = margin
+        min_y = margin
+        max_x = w_img - margin - 1
+        max_y = h_img - margin - 1
+        
+        expected_shape = (window_size, window_size)
+
+        # --- 3. Data Preparation & Metrics Setup ---
         long_no_apo_df = merged_df_long[merged_df_long['apoptotic'] == 0]
         unique_track_ids = np.unique(long_no_apo_df['track_id'])
 
         num_healthy_crops = 0
-        rejected_windows = 0
-        num_blocked = 0
-        num_wrong_size = 0
-        num_track_too_short = 0
-        num_filtered = 0
+        num_blocked = 0         # Blocked by nearby apo
+        num_wrong_size = 0      # Spatial rejections from _find_valid_crop_seq..
+        num_track_too_short = 0 # Temporal rejections from _find_valid_crop..
+        num_filtered = 0        # Failed post-crop QC
+        num_skipped_tracks = 0  # Tracks with no valid windows at all
 
+        # --- 4. Main Loop (Iterating over Tracks) ---
         for i, track_id in tqdm(enumerate(unique_track_ids),
-                                total=len(unique_track_ids),
-                                desc="Cropping non-apo Windows"):
+                                    total=len(unique_track_ids),
+                                    desc="Cropping non-apo Windows"):
             track_id = int(track_id)
             single_cell_df = long_no_apo_df.loc[
                 long_no_apo_df['track_id'] == track_id
-                ]
-            start_t = min(single_cell_df['t'])
-            single_cell_df = single_cell_df.loc[
-                single_cell_df['t'] <= start_t + num_frames
-                ]
-            
-            if len(single_cell_df) < (num_frames + 1):
-                logger.debug("\t\tSkipping current object, track too short.")
-                num_track_too_short += 1
-                rejected_windows += 1
+            ].copy()
+
+            # --- 4a. Find Valid Sequences ---
+            valid_crops_list, status_dict = self._find_valid_crop_sequences(
+                single_cell_df,
+                step,
+                MIN_REQUIRED_LENGTH,
+                min_x, min_y, max_x, max_y,
+                max_crops_to_extract=-1 # Find all valid sequences
+            )
+            num_wrong_size += status_dict.get('num_spatial_rejections', 0)
+
+            if not valid_crops_list:
+                num_skipped_tracks += 1
+                if status_dict.get('track_too_short', False):
+                    num_track_too_short += 1
+                continue # No valid crops to process for this track
+
+            # --- 4b. Sample Crops ---
+            # (prioritize_first=False for healthy cells)
+            sampled_crops_list = self._sample_valid_crops(
+                valid_crops_list, 
+                CROPS_PER_TRACK_HEALTHY,
+                prioritize_first=False
+            )
+        
+            if not sampled_crops_list:
                 continue
 
-            windows = []
-            mask_windows = []
-            break_loop = False
-            for _, sc_row in single_cell_df.iterrows():
-                window = crop_window(imgs[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), window_size)
-                mask_window = crop_window(tracked_masks[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), window_size)
-                apo_window = crop_window(apo_check_array[int(sc_row['t'])], int(sc_row['x']), int(sc_row['y']), window_size)
-                
-                mask_window = mask_window.astype(int)
-                mask_window[mask_window != track_id] = 0
-                
-                is_blocked = np.any(apo_window == 1)
-                is_window_valid = (window.shape == (target_size, target_size)) and (not is_blocked)
+            # --- 4c. Extract and Save Sampled Crops ---
+            for positions_to_crop_df in sampled_crops_list:
+                windows = []
+                mask_windows = []
+                is_blocked_crop = False
+                crop_start_t = positions_to_crop_df['t'].min()
 
-                if is_window_valid:
+                for _, sc_row in positions_to_crop_df.iterrows():
+                    current_t, current_x, current_y = int(sc_row['t']), int(sc_row['x']), int(sc_row['y'])
+                    
+                    # --- Blocking Check ---
+                    apo_window = crop_window(apo_check_array[current_t], current_x, current_y, window_size)
+                    if np.any(apo_window == 1):
+                        logger.debug(f"\t\tTrack {track_id}, crop at t={crop_start_t} blocked by nearby apoptosis.")
+                        num_blocked += 1
+                        is_blocked_crop = True
+                        break # Exit inner frame loop for this crop
+
+                    # --- Crop (Spatial safety is pre-validated) ---
+                    window = crop_window(imgs[current_t], current_x, current_y, window_size)
+                    mask_window = crop_window(tracked_masks[current_t], current_x, current_y, window_size)
+            
+                    mask_window = mask_window.astype(int)
+                    mask_window[mask_window != track_id] = 0
+                    
                     windows.append(window)
                     mask_windows.append(mask_window)
-                elif is_blocked:
-                    logger.debug("\t\tCrop blocked because of apoptotic event closeby")
-                    num_blocked += 1
-                    rejected_windows += 1
-                    break_loop = True
-                    break
-                else:
-                    num_wrong_size += 1
-                    rejected_windows += 1
-                    logger.debug(f"\t\tRejected window at (t={int(sc_row['t'])}): Blocked={is_blocked}, Shape={window.shape}")
-                    break_loop = True
-                    break
-            
-            if break_loop or len(windows) < num_frames + 1:
-                continue
 
-            # Feature calculation and QC (Only run on full sequences)
-            if len(windows) == (num_frames) + 1:
+                if is_blocked_crop:
+                    continue # Move to the next sampled crop
+
+                # --- Final Validation (Sanity Check) ---
+                enough_frames = len(windows) == MIN_REQUIRED_LENGTH
+                all_frames_correct_size = all(w.shape == expected_shape for w in windows)
+                
+                if not enough_frames or not all_frames_correct_size:
+                    logger.warning(f"CRITICAL: Post-validation failed for non-apo track {track_id}!")
+                    continue
+
+                # --- 5d. Feature Calculation ---
                 current_features = []
                 for mask, img in zip(mask_windows, windows):
-                    props = measure.regionprops_table(mask, img, properties=['label', 'eccentricity',
-                                                                            'intensity_mean', 'intensity_std',
-                                                                            'solidity', ])
-                    feature_df = pd.DataFrame(props)
-                    if not feature_df.empty:
-                        current_features.append(feature_df)
-                        
-                if current_features:
-                    track_features = pd.concat(current_features, ignore_index=True)
-                    # Add static info for mean calculation later
-                    track_features['x'] = single_cell_df['x'].iloc[0]
-                    track_features['y'] = single_cell_df['y'].iloc[0]
-                    track_features['t'] = start_t
-                    mean_features = track_features.mean()
-                    mean_features['filename'] = f'cell_{filename}_{track_id}.tif'
-                    self.all_features.append(mean_features)
+                    try:
+                        props = measure.regionprops_table(mask, img, properties=['label', 'eccentricity',
+                                                                                    'intensity_mean', 'intensity_std',
+                                                                                    'solidity'])
+                        feature_df = pd.DataFrame(props)
+                        if not feature_df.empty:
+                            current_features.append(feature_df)
+                    except Exception as e:
+                        logger.warning(f"Feature extraction failed for track {track_id} at t={crop_start_t}. Error: {e}")
+                
+                if not current_features:
+                    logger.debug(f"No features found for track {track_id} at t={crop_start_t} (e.g., empty mask). Skipping.")
+                    continue
 
-                    mean_eccentricity = mean_features['eccentricity']
-                    mean_intensity = mean_features['intensity_mean']
-                    mean_std = mean_features['intensity_std']
-                    mean_solidity = mean_features['solidity']
+                track_features = pd.concat(current_features, ignore_index=True)
+                track_features['x'] = single_cell_df['x'].iloc[0]
+                track_features['y'] = single_cell_df['y'].iloc[0]
+                track_features['t'] = crop_start_t
+                mean_features = track_features.mean()
+                
+                windows = np.asarray(windows)
 
-                    windows = np.asarray(windows)
+                # --- 5e. File Naming and Saving ---
+                counter_key = (filename, track_id, 'no_apo')
+                current_idx = self.track_crop_counter.get(counter_key, 0) + 1
+                self.track_crop_counter[counter_key] = current_idx
+
+                final_name = self._generate_crop_filename(
+                    filename=filename,
+                    class_label='no_apo',
+                    track_id=track_id,
+                    crop_index=current_idx
+                )
+
+                mean_features['filename'] = final_name
+                self.all_features.append(mean_features)
+
+                # TODO: Save feature data? Maybe not necessary
+                tiff.imwrite(os.path.join(self.features_dir, 'raw_images', final_name), windows)
+                tiff.imwrite(os.path.join(self.features_dir, 'masks', final_name), np.asarray(mask_windows))
+
+                # --- 5f. QC Check (Unique to healthy logic) ---
+                # TODO: Make optional
+                mean_eccentricity = mean_features['eccentricity']
+                mean_intensity = mean_features['intensity_mean']
+                mean_std = mean_features['intensity_std']
+                mean_solidity = mean_features['solidity']
+
+                is_filtered = any((mean_eccentricity < ECCENTRICITY_THR,
+                                    mean_std > CROP_STD_THR,
+                                    mean_intensity > CROP_MEAN_INT_THR,
+                                    mean_solidity < SOLIDITY_THR))
+
+                if is_filtered:
+                    tiff.imwrite(os.path.join(self.bad_crops, f'no_apo_{filename}', final_name), windows.transpose(1, 2, 0))
+                    num_filtered += 1
+                else:
+                    # --- Save Good Crop ---
+                    target_path = os.path.join(window_dir, 'no_apo', final_name)
+                    tiff.imwrite(target_path, windows.transpose(1, 2, 0))
+
+                    # --- 5g. Create Symlink ---
+                    link_name_for_qc = f'trackID_{track_id}_crop_{current_idx}.tif' 
+                    link_path = os.path.join(self.crops_dir, f'no_apo_{filename}', link_name_for_qc)
+
+                    try:
+                        if os.path.exists(link_path) or os.path.islink(link_path):
+                            os.remove(link_path)
+                        os.symlink(os.path.abspath(target_path), link_path)
+                    except Exception as e:
+                        logger.error(f"Failed to create soft link {link_path}. Error: {e}")
                     
-                    # Save data for features analysis
-                    tiff.imwrite(os.path.join(self.features_dir, 'raw_images', f'cell_{filename}_{track_id}.tif'), windows)
-                    tiff.imwrite(os.path.join(self.features_dir, 'masks', f'cell_{filename}_{track_id}.tif'), np.asarray(mask_windows))
-
-                    # QC Check
-                    is_filtered = any((mean_eccentricity < self.config['ECCENTRICITY_THR'],
-                                       mean_std > self.config['CROP_STD_THR'],
-                                       mean_intensity > self.config['CROP_MEAN_INT_THR'],
-                                       mean_solidity < self.config['SOLIDITY_THR']))
-                    
-                    counter_key = (filename, track_id)
-                    current_idx = self.track_crop_counter.get(counter_key, 0) + 1
-                    self.track_crop_counter[counter_key] = current_idx
-
-                    final_name = self._generate_crop_filename(
-                        filename=filename,
-                        class_label='no_apo',
-                        track_id=track_id,
-                        crop_index=current_idx
-                    )
-
-                    if is_filtered:
-                        tiff.imwrite(os.path.join(self.bad_crops, f'no_apo_{filename}', final_name), windows.transpose(1, 2, 0))
-                        rejected_windows += 1
-                        num_filtered += 1
-                    else:
-                        target_path = os.path.join(window_dir, 'no_apo', final_name)
-                        tiff.imwrite(target_path, windows.transpose(1, 2, 0))
-
-                        # 2. Define the path for the SOFT LINK (The human-readable QC name)
-                        link_name_for_qc = f'trackID_{track_id}.tif' 
-                        # Link path must include the file-specific 'no_apo' folder you created
-                        link_path = os.path.join(self.crops_dir, f'no_apo_{filename}', link_name_for_qc)
-
-                        # 3. Create the soft link in the CROPS_DIR pointing to the original file
-                        try:
-                            if os.path.exists(link_path) or os.path.islink(link_path):
-                                os.remove(link_path)
-                                
-                            # os.symlink(source, link_name)
-                            os.symlink(target_path, link_path)
-                            
-                        except Exception as e:
-                            logger.error(f"Failed to create soft link for healthy crop {link_name_for_qc}. Error: {e}")
-
-                        num_healthy_crops += 1
+                    num_healthy_crops += 1
         
+        # --- 6. Logging and Return ---
         logger.info(f"\t\tFound {num_healthy_crops} valid crops of healthy cells.")
-        if rejected_windows > 0:
-            logger.info(f"\t\t\t{rejected_windows} crops were rejected in total.")
-            logger.info(f"\t\t\t{num_blocked} blocked.")
-            logger.info(f"\t\t\t{num_wrong_size} wrong size.")
+        total_rejected = num_blocked + num_wrong_size + num_track_too_short + num_filtered + num_skipped_tracks
+        if total_rejected > 0:
+            logger.info(f"\t\t\t{total_rejected} potential crops were rejected in total.")
+            logger.info(f"\t\t\t{num_blocked} blocked by nearby apoptosis.")
+            logger.info(f"\t\t\t{num_wrong_size} rejected for spatial/border issues.")
             logger.info(f"\t\t\t{num_track_too_short} tracks too short.")
-            logger.info(f"\t\t\t{num_filtered} filtered out in qc.")
-
+            logger.info(f"\t\t\t{num_filtered} filtered out in post-crop QC.")
+            logger.info(f"\t\t\t{num_skipped_tracks} tracks had no valid windows at all.")
+            
         return {
             'num_healthy_crops': num_healthy_crops,
-            'healthy_rejected': rejected_windows,
+            'healthy_rejected': total_rejected,
             'healthy_blocked': num_blocked,
             'healthy_wrong_size': num_wrong_size,
             'healthy_track_too_short': num_track_too_short,
-            'healthy_filtered_qc': num_filtered
+            'healthy_filtered_qc': num_filtered,
+            'healthy_tracks_skipped': num_skipped_tracks
         }
-        # --- End of your Healthy Cropping Logic Refactored ---
-          
+
+
     def _crop_random(self, filename, num_apo_crops, apo_track_ids, apo_check_array, 
-                     imgs, tracked_masks, window_size, target_size, num_frames, 
+                     imgs, tracked_masks, window_size, num_frames, 
                      step, window_dir):
         """Logic for cropping random spots."""
-        # This is where the third section of your main loop logic goes.
-        # ... (Your random cropping logic goes here) ...
-
-        # --- Start of your Random Cropping Logic Refactored ---
         num_random_tracks = num_apo_crops # Try to match the number of apo crops
         logger.info(f'\tStarting cropping for {num_random_tracks} random spots.')
 
@@ -769,7 +831,7 @@ class Cropping:
                 current_apo_ids = set(current_apo_track_ids['track_id'])
 
                 is_pixel_not_in_apo = not any(pixel in current_apo_ids for pixel in present_track_ids)
-                is_window_correct_size = window.shape == (target_size, target_size)
+                is_window_correct_size = window.shape == (window_size, window_size)
                 is_area_blocked = np.any(apo_check_array_crop == 1)
                 
                 if (
