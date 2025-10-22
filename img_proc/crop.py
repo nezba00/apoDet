@@ -48,11 +48,14 @@ class Cropping:
         self.bad_crops = config['BAD_CROPS']
         self.features_dir = config['FEATURES_DIR']
         self.apo_check_array_dir = config['APO_CHECK_ARRAY_DIR']
+        self.upsample_dir = config['UPSAMPLE_DIR']
 
 
         # Lists and counters (will be updated during processing)
         self.survival_times = []
         self.all_features = []
+
+        self.metadata_rows = []
 
         # Ensure output directories exist
         self._setup_directories()
@@ -64,7 +67,8 @@ class Cropping:
         output_dirs = [
             self.crops_dir, self.windows_dir, 
             self.bad_crops, self.features_dir, 
-            self.apo_check_array_dir, self.windows_dir_20x
+            self.apo_check_array_dir, self.windows_dir_20x,
+            self.upsample_dir
         ]
         for path in output_dirs:
             os.makedirs(path, exist_ok=True)
@@ -172,6 +176,17 @@ class Cropping:
             os.path.join(self.apo_check_array_dir, f'{filename}.tif'),
             apo_check_array.transpose(1, 2, 0)
         )
+
+        if self.metadata_rows:
+            metadata_df = pd.DataFrame(self.metadata_rows)
+            output_csv_path = os.path.join(
+                self.upsample_dir,      # Save where the upsampled output is saved
+                f'metadata_{filename}.csv'
+            )
+            metadata_df.to_csv(output_csv_path, index=False)
+            logger.info(f"Saved {len(metadata_df)} metadata entries to {output_csv_path}")
+        else:
+             logger.warning(f"No crops were generated for {filename}, skipping metadata save.")
 
         logger.info(f"Finished processing {filename}. Results: {metrics}")
         
@@ -528,7 +543,22 @@ class Cropping:
                 )
 
                 target_path = os.path.join(window_dir, 'apo', final_name)
+                target_path_upsampled = os.path.join(self.upsample_dir, 'apo', final_name)
                 tiff.imwrite(target_path, sub_windows.transpose(1, 2, 0))
+
+                # Save Metadata for Downstream Analysis
+                start_row = positions_to_crop_df.iloc[0]
+                
+                self.metadata_rows.append({
+                    'file_path': os.path.abspath(target_path_upsampled),
+                    'filename': filename,
+                    'track_id': current_track_id,
+                    't_start': int(start_row['t']),       # Starting frame time
+                    'y_center': float(start_row['y']),    # Original Y coordinate (float)
+                    'x_center': float(start_row['x']),    # Original X coordinate (float)
+                    'window_size': window_size,
+                    'class': 'apo'
+                })
 
                 # --- Softlink Creation ---
                 link_name_for_qc = f'trackID_{current_track_id}_crop_{current_idx}.tif'
@@ -756,6 +786,22 @@ class Cropping:
                     # --- Save Good Crop ---
                     target_path = os.path.join(window_dir, 'no_apo', final_name)
                     tiff.imwrite(target_path, windows.transpose(1, 2, 0))
+
+                    # Save Metadata for Downstream Analysis
+                    start_row = positions_to_crop_df.iloc[0] 
+
+                    target_path_upsampled = os.path.join(self.upsample_dir, 'apo', final_name)
+
+                    self.metadata_rows.append({
+                        'file_path': os.path.abspath(target_path_upsampled),
+                        'filename': filename,
+                        'track_id': track_id,
+                        't_start': int(start_row['t']),       # Starting frame time
+                        'y_center': float(start_row['y']),    # Original Y coordinate (float)
+                        'x_center': float(start_row['x']),    # Original X coordinate (float)
+                        'window_size': window_size,
+                        'class': 'no_apo'
+                    })
 
                     # --- 5g. Create Symlink ---
                     link_name_for_qc = f'trackID_{track_id}_crop_{current_idx}.tif' 

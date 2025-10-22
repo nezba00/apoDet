@@ -13,7 +13,7 @@ from pathlib import Path
 # ==================================
 # GLOBAL & EXTERNAL SETTINGS
 # ==================================
-RUN_NAME = "new_apo_crop_logic4"
+RUN_NAME = "metadata_test3"
 
 # 1. Base Project Directories (Relative to execution)
 BASE_DATA_DIR = Path("./data") / RUN_NAME
@@ -111,6 +111,7 @@ APO_MATCH_CONFIG = {
 # 4. Apoptosis Window Cropping
 # ==================================
 APO_CROP_CONFIG = {
+    'UPSAMPLE_DIR': BASE_DATA_DIR / OUTPUT_DIRS['WINDOW_CROPS_UPSAMPLED'],
     # Output Directories (Final Products)
     'WINDOWS_DIR': BASE_DATA_DIR / OUTPUT_DIRS['WINDOW_CROPS_BASE'],
     'WINDOWS_DIR_20X': BASE_DATA_DIR / OUTPUT_DIRS['WINDOW_CROPS_20X_BASE'],
