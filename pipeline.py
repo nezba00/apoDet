@@ -2,7 +2,18 @@ import os
 import sys
 import logging
 from datetime import datetime
+import numpy as np
 import pandas as pd
+import random
+
+import tensorflow as tf
+
+seed_value = 42
+
+# 2. Global Seeds
+random.seed(seed_value)
+np.random.seed(seed_value)
+tf.random.set_seed(seed_value)
 
 try:
     from config import (

@@ -235,11 +235,15 @@ class Cropping:
         Returns:
         - valid_crops: List with DataFrames with the validated rows. Empty if no valid series is found.
         """
+        # First remove t0 because of bad tracking quality in first frame
+        single_cell_df = single_cell_df[single_cell_df['t'] != 0].copy()
+
+        track_data = single_cell_df[['t', 'x', 'y']].values # Convert to a NumPy array for speed
+        time_to_index = {t: i for i, t in enumerate(track_data[:, 0])}
+        min_t, max_t = track_data[:, 0].min(), track_data[:, 0].max()
+        present_time_points = set(np.unique(track_data[:, 0]))
 
         track_id = single_cell_df['track_id'].iloc[0] if not single_cell_df.empty else "N/A"
-
-        present_time_points = set(single_cell_df['t'].unique())
-        min_t, max_t = single_cell_df['t'].min(), single_cell_df['t'].max()
 
 
         # available_track_length = len(single_cell_df)
@@ -266,47 +270,37 @@ class Cropping:
 
         for start_t in possible_t0_list:
             required_time_points = list(range(start_t, start_t + time_span_needed + 1, step))
-
+            
+            # --- TEMPORAL CHECK ---
             is_temporally_consistent = all(t in present_time_points for t in required_time_points)
-
             if not is_temporally_consistent:
-                # print(f"\t\t[Track {track_id} Validation] Start Time {start_t} FAILED: Temporal consistency violated (missing frame(s) in the sequence).")
                 num_temporal_rejections += 1
                 continue
-
-            # Extract rows based on 't'
-            potential_rows_df = single_cell_df[single_cell_df['t'].isin(required_time_points)]
             
-            if len(potential_rows_df) != required_count:
-                # This indicates a severe bug in the time-point mapping if it triggers
-                print(f"CRITICAL: Length mismatch after consistency check for t={start_t}")
-                continue
-
-
-            # Check if all x-coordinates are within the horizontal boundary
-            x_valid = (
-                (potential_rows_df['x'] >= min_x) & 
-                (potential_rows_df['x'] <= max_x)
-            ).all()
+            # --- GET INDICES ---
+            required_indices = [time_to_index[t] for t in required_time_points]
             
-            # Check if all y-coordinates are within the vertical boundary
-            y_valid = (
-                (potential_rows_df['y'] >= min_y) & 
-                (potential_rows_df['y'] <= max_y)
-            ).all()
+            # --- SPATIAL CHECK ---
+            x_coords = track_data[required_indices, 1] # 1 is 'x' column
+            y_coords = track_data[required_indices, 2] # 2 is 'y' column
+
+            x_valid = np.all((x_coords >= min_x) & (x_coords <= max_x))
+            y_valid = np.all((y_coords >= min_y) & (y_coords <= max_y))
 
             if x_valid and y_valid:
-                # Found a valid temporal and spatial alignment!
-                valid_crops.append(potential_rows_df.copy())
+                valid_crops.append(required_indices)
+                
                 if max_crops_to_extract != -1 and len(valid_crops) >= max_crops_to_extract:
+                    final_crops = [single_cell_df.iloc[indices].copy() for indices in valid_crops]
+
                     results_dict = {'track_too_short': False, 
-                            'num_spatial_rejections': num_spatial_rejections,
-                            'num_temporal_rejections': num_temporal_rejections
-                        }
-                    return valid_crops, results_dict
+                        'num_spatial_rejections': num_spatial_rejections,
+                        'num_temporal_rejections': num_temporal_rejections
+                    }
+
+                    return final_crops, results_dict
             else:
                 num_spatial_rejections += 1
-                # print(f"\t\t[Track {track_id} Validation] start time {start_t} FAILED: Spatial boundaries violated for at least one frame.")
                 
         # If the loop completes without finding a valid sequence
         if not valid_crops:
@@ -315,13 +309,17 @@ class Cropping:
                 f"\t\t[Track {track_id} Validation] FAILED: Exhausted all {num_starts_checked} "
                 f"start indices (Spatial Rej: {num_spatial_rejections}, Temporal Rej: {num_temporal_rejections})."
             )
-            # print(f"\t\t[Track {track_id} Validation] FAILED: Exhausted all {num_starts_checked} possible start indices; no valid series found.")
-        
+            final_crops = []
+        else:
+            final_crops = [single_cell_df.iloc[indices].copy() for indices in valid_crops]
+
+
+
         results_dict = {'track_too_short': False, 
                         'num_spatial_rejections': num_spatial_rejections,
                         'num_temporal_rejections': num_temporal_rejections
                     }
-        return valid_crops, results_dict
+        return final_crops, results_dict
 
     def _sample_valid_crops(
         self, 
