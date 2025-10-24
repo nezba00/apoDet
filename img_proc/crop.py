@@ -790,7 +790,7 @@ class Cropping:
                     # Save Metadata for Downstream Analysis
                     start_row = positions_to_crop_df.iloc[0] 
 
-                    target_path_upsampled = os.path.join(self.upsample_dir, 'apo', final_name)
+                    target_path_upsampled = os.path.join(self.upsample_dir, 'no_apo', final_name)
 
                     self.metadata_rows.append({
                         'file_path': os.path.abspath(target_path_upsampled),
