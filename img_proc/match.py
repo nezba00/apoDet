@@ -54,6 +54,12 @@ class Matching:
         """
         logger.info(f"\tStarting Matching for {filename}.")
 
+        if apo_annotations is None or apo_annotations.empty:
+            reason = "missing file/path" if apo_annotations is None else "empty data"
+            logger.warning(f"\tSkipping Matching for {filename}: Input apo_annotations is {reason}.")
+            
+            return None, pd.DataFrame() 
+
         # --- 1. Determine Time Multiplier ---
         exp_info = get_experiment_info(filename, experiments_list)
         # Use default apo annotation frequency of 5 min if not specified
@@ -75,33 +81,46 @@ class Matching:
         )
 
         # --- 3. Update Metrics and Save ---
-        self.total_matches += metrics['num_matches']
-        self.total_mismatches += metrics['num_mismatches']
-        self.all_metrics.append(metrics)
-        
-        logger.info(f"\t\tFound {metrics['num_matches']} matches and {metrics['num_mismatches']} mismatches.")
-        success_rate = (metrics['num_matches']*100)/(metrics['num_matches']+metrics['num_mismatches']) if (metrics['num_matches']+metrics['num_mismatches']) > 0 else 0
-        logger.info(f"\t\t{success_rate:.2f}% Success Rate")
+        if metrics is not None:
+            self.total_matches += metrics['num_matches']
+            self.total_mismatches += metrics['num_mismatches']
+            self.all_metrics.append(metrics)
+            
+            logger.info(f"\t\tFound {metrics['num_matches']} matches and {metrics['num_mismatches']} mismatches.")
+            success_rate = (metrics['num_matches']*100)/(metrics['num_matches']+metrics['num_mismatches']) if (metrics['num_matches']+metrics['num_mismatches']) > 0 else 0
+            logger.info(f"\t\t{success_rate:.2f}% Success Rate")
 
-        # Apply multiplier to time column for later analysis
-        apo_annotations_match['correct_t'] = apo_annotations_match['t'] * multiplier
+            # Apply multiplier to time column for later analysis (only for successful match data)
+            apo_annotations_match['correct_t'] = apo_annotations_match['t'] * multiplier
 
-        # Save output
-        output_path = os.path.join(self.csv_dir, f'{filename}.csv')
-        apo_annotations_match.to_csv(output_path, index=False)
-        logger.info(f"\t\tApo-Annotations with new centroids saved at: {output_path}")
+            # Save output (only for successful match data)
+            output_path = os.path.join(self.csv_dir, f'{filename}.csv')
+            apo_annotations_match.to_csv(output_path, index=False)
+            logger.info(f"\t\tApo-Annotations with new centroids saved at: {output_path}")
+
+        else:
+            # Log a warning if matching was skipped (i.e., annotations were empty)
+            logger.warning(f"\t\tSkipped metrics update for {filename} (no annotations/empty file).")
 
         return metrics, apo_annotations_match
 
     def finalize(self):
         """Called once at the end of the pipeline to perform final plotting."""
-        logger.info("Finalizing Matching results: Generating distance plots.")
-        
-        # Plotting uses the accumulated metrics from all processed files
-        plot_matching_distances(self.all_metrics, self.plot_dir, self.run_name)
-        
-        total_attempts = self.total_matches + self.total_mismatches
-        final_success = (self.total_matches*100)/total_attempts if total_attempts > 0 else 0
-        
+        if not self.all_metrics:
+            logger.info("Finalizing Matching results: No metrics were collected (all files skipped matching). Skipping plots.")
+            
+            # Calculate final success based on total_attempts (which will be 0)
+            total_attempts = self.total_matches + self.total_mismatches
+            final_success = 0 
+        else:
+            logger.info("Finalizing Matching results: Generating distance plots.")
+            
+            # Plotting uses the accumulated metrics from all processed files
+            # This line is now safe because self.all_metrics is not empty
+            plot_matching_distances(self.all_metrics, self.plot_dir, self.run_name)
+            
+            total_attempts = self.total_matches + self.total_mismatches
+            final_success = (self.total_matches*100)/total_attempts if total_attempts > 0 else 0
+            
         logger.info(f"Matching finished. Total matches: {self.total_matches}, Total mismatches: {self.total_mismatches}.")
         logger.info(f"Final Success Rate: {final_success:.2f}%")

@@ -149,25 +149,37 @@ def main():
     for path, filename in zip(image_paths, filenames):
         logger.info(f"--- Running Pipeline for {filename} ---")
 
-        try:
-            apo_file = os.path.join(
-                APO_MATCH_CONFIG['APO_ANNOTATIONS_DIR'], 
-                f'{filename}.csv'
-            )
-            # Load annotation file for the current image
-            apo_annotations = pd.read_csv(
-                apo_file, 
-                header=None,
-                names=['filename', 'x', 'y', 't'],
-                on_bad_lines='skip'
-            ).dropna()
-            logger.info(f"Loaded {len(apo_annotations)} apoptosis annotations for {filename}.")
-        except FileNotFoundError:
-            logger.warning(f"Apoptosis annotation file not found for {filename} ({apo_file}). Continuing without annotations.")
-            apo_annotations = pd.DataFrame(columns=['filename', 'x', 'y', 't']) # Create empty DF
-        except Exception as e:
-            logger.error(f"Error loading APO annotations for {filename}: {e}", exc_info=True)
-            apo_annotations = pd.DataFrame(columns=['filename', 'x', 'y', 't']) # Create empty DF
+        # Initialize the default (safe, empty) value
+        apo_annotations = pd.DataFrame(columns=['filename', 'x', 'y', 't']) 
+        
+        if not APO_MATCH_CONFIG.get('APO_ANNOTATIONS_DIR'):
+            logger.warning(f"Skipping APO annotation loading for {filename}: 'APO_ANNOTATIONS_DIR' is not configured.")
+            # apo_annotations remains the safe empty DF. The Matching module will skip.
+            
+        else:
+            try:
+                # Path to current annotation file
+                apo_file = os.path.join(
+                    APO_MATCH_CONFIG['APO_ANNOTATIONS_DIR'], 
+                    f'{filename}.csv'
+                )
+                
+                # Load annotation file for the current image
+                apo_annotations = pd.read_csv(
+                    apo_file, 
+                    header=None,
+                    names=['filename', 'x', 'y', 't'],
+                    on_bad_lines='skip'
+                ).dropna()
+                
+                logger.info(f"Loaded {len(apo_annotations)} apoptosis annotations for {filename}.")
+            
+            except FileNotFoundError:
+                logger.warning(f"Apoptosis annotation file not found for {filename} ({apo_file}). Continuing with empty annotations.")
+                # apo_annotations is already the empty DF, so no need to reset it.
+                
+            except Exception as e:
+                logger.error(f"Error loading APO annotations for {filename}: {e}", exc_info=True)
 
         imgs = load_image_stack(path)
 
@@ -201,22 +213,22 @@ def main():
                                         experiments_list)
                 
                 # Add a flag to indicate successful data generation
-                matching_successful = metrics is not None
+                matching_skipped = False
                 
-                if matching_successful:
+                if not matching_skipped:
                     logger.info(f"Matching successfully completed for {filename}.")
                 else:
                     logger.warning(f"Matching process completed for {filename} but returned no metrics (data likely missing).")
                     
             except Exception as e:
                 logger.error(f"Error in Matching for {filename}: {e}", exc_info=True)
-                matching_successful = False # Ensure flag is False on error
+                matching_skipped = True # Ensure flag is False on error
         else:
             logger.warning(f"Skipping Matching for {filename} due to prior Tracking failure.")
-            matching_successful = False # Ensure flag is False if skipped
+            matching_skipped = True # Ensure flag is False if skipped
 
         # --- CROPPING STAGE ---
-        if matching_successful:
+        if not matching_skipped:
             try:
                 cropping_module.process(filename, experiments_list,
                                         imgs, merged_df, tracked_masks,
@@ -225,7 +237,7 @@ def main():
             except Exception as e:
                 logger.error(f"Error in Cropping for {filename}: {e}", exc_info=True)
         else:
-            logger.warning(f"Skipping Cropping for {filename} due to prior Matching failure.")
+            logger.warning(f"Skipping Cropping for {filename} due to prior Matching/Tracking failure.")
 
     
     logger.info("Main loop finished. Starting finalization steps.")

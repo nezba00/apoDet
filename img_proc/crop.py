@@ -393,6 +393,20 @@ class Cropping:
                         imgs, tracked_masks, window_size, num_frames, 
                         step, acquisition_freq, window_dir):
         """Logic for cropping apoptotic cells."""
+        
+        if apo_annotations is None or apo_annotations.empty:
+            logger.warning(f"\tSkipping Apoptotic Cell Cropping for {filename}: apo_annotations is empty or None.")
+            
+            # Must return the same structure as the successful case
+            return pd.DataFrame(columns=['track_id', 'apo_start_t']), {
+                'num_apo_crops': 0,
+                'apo_tracks_successful': 0,
+                'apo_no_match': 0,
+                'apo_wrong_size': 0,
+                'apo_track_too_short': 0,
+                'apo_tracks_skipped': 0
+            }
+
         # --- Metrics Setup ---
         num_apo_crops = 0
         num_no_match = 0
