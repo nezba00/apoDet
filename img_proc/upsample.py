@@ -33,9 +33,10 @@ class Upsampling:
                 img = tifffile.imread(image_path)
                 
                 # Assumes channels are last (H, W, C)
-                if len(img.shape) == 3 and img.shape[-1] == 5:
+                if len(img.shape) == 3:
                     # Resize the image while preserving all channels
-                    resized_img = resize(img, (*target_size, 5), 
+                    num_channels = img.shape[-1]
+                    resized_img = resize(img, (*target_size, num_channels), 
                                          anti_aliasing=True, 
                                          preserve_range=True)
                     
