@@ -2,11 +2,15 @@ import os
 import sys
 import logging
 from datetime import datetime
+import time
 import numpy as np
 import pandas as pd
 import random
 
 import tensorflow as tf
+
+from img_proc.utils import sync_scratch_dirs
+
 
 seed_value = 42
 
@@ -74,12 +78,17 @@ def setup_logging(log_dir, module_name):
 
 def main(): 
     """Main function to run the image processing pipeline."""
+
+
+    # Start Timer
+    pipeline_start_time = time.time()
     
     # 1. Configuration is loaded via direct import (done at the top of the file)
-    
-    # Use the Experiment Info path from one of the imported config dictionaries.
-    # SEGMENTATION_CONFIG is a good place to pull this global path from.
     GLOBAL_EXPERIMENT_INFO_PATH = EXTERNAL_PATHS['EXPERIMENT_INFO_CSV']
+    TARGET_CHANNEL = SEGMENTATION_CONFIG.get('TARGET_CHANNEL', None)
+    if TARGET_CHANNEL is not None:
+        TARGET_CHANNEL = int(TARGET_CHANNEL)
+
 
     # 2. Setup Logging
     # LOG_DIR is imported directly.
@@ -142,10 +151,12 @@ def main():
     tracking_module = Tracking(TRACKING_CONFIG)
     matching_module = Matching(APO_MATCH_CONFIG)
     cropping_module = Cropping(APO_CROP_CONFIG)
-    upsampling_module = Upsampling(UPSAMPLING_CONFIG)
+    # upsampling_module = Upsampling(UPSAMPLING_CONFIG)
     logger.info("All components initialized. Starting main loop.")
     
     # 7. Main Loop
+    loop_start_time = time.time()
+
     for path, filename in zip(image_paths, filenames):
         logger.info(f"--- Running Pipeline for {filename} ---")
 
@@ -181,19 +192,22 @@ def main():
             except Exception as e:
                 logger.error(f"Error loading APO annotations for {filename}: {e}", exc_info=True)
 
-        imgs = load_image_stack(path)
+        imgs = load_image_stack(path, TARGET_CHANNEL)
 
         
         # --- SEGMENTATION STAGE ---
+        stage_start = time.time()
         try:
             seg_out = segmentation_module.process(imgs, filename, experiments_list)
             gt_filtered, summary_df, details, gt_unfiltered = seg_out
             logger.info(f"Segmentation complete for {filename}.")
         except Exception as e:
             logger.error(f"Error in Segmentation for {filename}: {e}", exc_info=True)
-            continue 
+            continue
+        logger.info(f"    - Segmentation Time: {time.time() - stage_start:.2f} seconds.")
 
         # --- TRACKING STAGE ---
+        stage_start = time.time()
         try:
             merged_df, tracked_masks = tracking_module.process(
                 filename, gt_filtered, summary_df, 
@@ -203,10 +217,11 @@ def main():
                 logger.info(f"Tracking successfully completed and saved outputs for {filename}.")
         except Exception as e:
             logger.error(f"Error in Tracking for {filename}: {e}", exc_info=True)
-            # Decide whether to continue or abort. We will continue for now.
+        logger.info(f"    - Tracking Time: {time.time() - stage_start:.2f} seconds.")
         
         # --- MATCHING STAGE ---
         if merged_df is not None:
+            stage_start = time.time()
             try:
                 metrics, apo_annotations = matching_module.process(filename, apo_annotations,
                                         details, tracked_masks, gt_filtered,
@@ -217,6 +232,7 @@ def main():
                 
                 if not matching_skipped:
                     logger.info(f"Matching successfully completed for {filename}.")
+                    logger.info(f"    - Matching Time: {time.time() - stage_start:.2f} seconds.")
                 else:
                     logger.warning(f"Matching process completed for {filename} but returned no metrics (data likely missing).")
                     
@@ -229,6 +245,7 @@ def main():
 
         # --- CROPPING STAGE ---
         if not matching_skipped:
+            stage_start = time.time()
             try:
                 cropping_module.process(filename, experiments_list,
                                         imgs, merged_df, tracked_masks,
@@ -236,14 +253,18 @@ def main():
                 logger.info(f"Cropping successfully completed for {filename}.")
             except Exception as e:
                 logger.error(f"Error in Cropping for {filename}: {e}", exc_info=True)
+            logger.info(f"    - Cropping (Submission) Time: {time.time() - stage_start:.2f} seconds.")
         else:
             logger.warning(f"Skipping Cropping for {filename} due to prior Matching/Tracking failure.")
 
-    
+    loop_end_time = time.time()
     logger.info("Main loop finished. Starting finalization steps.")
+    logger.info(f"Time taken: {loop_end_time - loop_start_time:.2f} seconds.")
 
     # 8. Finalize Components
     # Call finalize on each module to perform cross-file plotting/saving.
+    logger.info("Starting finalization steps.")
+    finalize_start_time = time.time()
     try:
         matching_module.finalize()
         logger.info("Matching finalization complete.")
@@ -257,15 +278,36 @@ def main():
         logger.error(f"Error during Cropping finalization: {e}", exc_info=True)
         
     logger.info("Starting post-processing (Upsampling stage).")
+
+    #try:
+    #    # Call the finalize method to process all saved crops
+    #    upsampling_module.finalize()
+    #    logger.info("Upsampling post-processing complete.")
+    #except Exception as e:
+    #    logger.error(f"Error during Upsampling finalization: {e}", exc_info=True)
+
+    finalize_end_time = time.time()
+    logger.info(f"Finalize Time: {finalize_end_time - finalize_start_time:.2f} seconds.")
+
     try:
-        # Call the finalize method to process all saved crops
-        upsampling_module.finalize()
-        logger.info("Upsampling post-processing complete.")
+        sync_scratch_dirs(APO_CROP_CONFIG)
+        logger.info("Scratch directories successfully synced to final destination.")
+        
+        # Clean up scratch directory if it exists
+        scratch_base = APO_CROP_CONFIG.get('SCRATCH_DIR')
+        if scratch_base is not None and scratch_base.exists():
+            import shutil
+            shutil.rmtree(scratch_base)
+            logger.info(f"Scratch directory {scratch_base} removed after syncing.")
+        else:
+            logger.info("No scratch directory to clean up (SCRATCH_DIR is None or does not exist).")
     except Exception as e:
-        logger.error(f"Error during Upsampling finalization: {e}", exc_info=True)
+        logger.error(f"Error during scratch sync or cleanup: {e}", exc_info=True)
 
 
-        logger.info("Pipeline execution finished.")
+    pipeline_end_time = time.time()
+    logger.info("Pipeline execution finished.")
+    logger.info(f"**TOTAL PIPELINE RUNTIME**: {pipeline_end_time - pipeline_start_time:.2f} seconds.")
 
 if __name__ == '__main__':
     main()

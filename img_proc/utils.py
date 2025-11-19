@@ -1,4 +1,7 @@
 import os
+import subprocess
+from pathlib import Path
+import shutil
 import numpy as np
 import pandas as pd
 import logging
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 
-def load_image_stack(path):
+def load_image_stack(path, target_channel_index):
     """
     Loads an image stack from a file based on its extension.
 
@@ -50,13 +53,34 @@ def load_image_stack(path):
     """
     if path.endswith(('.tif', '.tiff')):
         # Load TIFF file using tifffile
-        return tiff.imread(path)
+        img_stack = tiff.imread(path)
     elif path.endswith('.nd2'):
         # Load ND2 file using ND2Reader and convert it to a numpy array
         with ND2Reader(path) as nd2:
-            return np.array(nd2)
+            img_stack = np.array(nd2)
     else:
         raise ValueError(f"Unsupported file format for file: {path}")
+
+    if img_stack.ndim <= 3:
+        # If it's 3D (T, H, W) or less, it's single-channel
+        return img_stack
+
+    # 3. Channel Extraction Logic (Only if an index is provided and stack is multi-channel)
+    if target_channel_index is not None:
+        num_channels = img_stack.shape[1]
+        
+        # Input validation for the channel index
+        if not (0 <= target_channel_index < num_channels):
+            raise ValueError(
+                f"Invalid channel index: {target_channel_index}. "
+                f"Image stack has {num_channels} channels (indices 0 to {num_channels-1})."
+            )
+        single_channel_stack = img_stack[:,target_channel_index,:,:]
+        return single_channel_stack
+    
+    # 4. If target_channel_index is None, return the full multi-channel stack
+    return img_stack
+
 
 def get_image_paths(directory):
     """
@@ -149,6 +173,106 @@ def get_experiment_info(filename, experiments_list):
         logger.info(f"\t\tFound experiment {exp_name} in experiment info.")
     
     return result
+
+
+def sync_scratch_dirs(config: dict):
+    """
+    Sync directories from scratch to final destination if SCRATCH_DIR is defined.
+
+    Parameters
+    ----------
+    config : dict
+        Dictionary containing paths for scratch and final directories.
+        Must contain 'SCRATCH_DIR' (can be None) and the relevant crop/output directories.
+    """
+    scratch_base = config.get('SCRATCH_DIR')
+    base_path = config.get('BASE_DATA_DIR')
+    if scratch_base is None:
+        logger.info("No scratch directory defined; skipping sync.")
+        return
+
+    # Ensure the final destination base path exists
+    final_base_path = Path(base_path)
+    final_base_path.mkdir(parents=True, exist_ok=True)
+
+    dirs_to_sync = [
+        ('UPSAMPLE_DIR', 'upsampled crops'),
+        ('WINDOWS_DIR', 'base crops'),
+        ('WINDOWS_DIR_20X', '20X crops')
+    ]
+
+    for key, desc in dirs_to_sync:
+        # Define paths for the directory and the archive
+        scratch_dir_path = Path(scratch_base) / Path(config[key]).name
+        archive_name = f"{Path(config[key]).name}.tar.xz" # Using .tar.xz for best lossless compression
+        scratch_archive_path = Path(scratch_base) / archive_name
+        final_archive_path = final_base_path / archive_name
+        
+        if not scratch_dir_path.exists():
+            logger.warning(f"Scratch path {scratch_dir_path} does not exist; skipping {desc}.")
+            continue
+
+        # --- A. COMPRESS on Scratch ---
+        logger.info(f"A. Compressing {desc} directory on scratch: {scratch_dir_path}")
+        try:
+            # Command 1: tar -cf - -C <parent_dir> <target_dir> (creates uncompressed archive to stdout)
+            # Command 2: pigz -p <cores> > <archive_path> (reads stdin, compresses, writes to file)
+            
+            tar_command = ["tar", "-cf", "-", "-C", str(scratch_dir_path.parent), scratch_dir_path.name]
+            pigz_command = ["pigz", "-p", "10", ">", str(scratch_archive_path)] # Using 10 cores
+            # TODO: add global constant for num cores during compression
+
+            # We use shell=True here to properly handle the pipe, and combine the commands
+            subprocess.run(
+                f"{' '.join(tar_command)} | {' '.join(pigz_command)}",
+                check=True, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            logger.info(f"Successfully created archive with pigz: {scratch_archive_path.name}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error compressing {desc} on scratch: {e}")
+            continue
+
+        # --- B. SYNC the Archive (Single large block transfer) ---
+        logger.info(f"B. Syncing single archive block to final destination: {final_base_path}")
+        try:
+            # Command: rsync -aP /scratch/.../archive.tar.xz /perm_storage/.../
+            subprocess.run(
+                ["rsync", "-aP", str(scratch_archive_path), str(final_base_path)],
+                check=True
+            )
+            logger.info(f"Finished syncing archive: {scratch_archive_path.name}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error syncing archive {desc}: {e}")
+            # Do not proceed to clean up if sync failed
+            continue
+
+        # --- C. DECOMPRESS on Final Destination ---
+        logger.info(f"C. Decompressing archive on final destination: {final_base_path}")
+        try:
+            # Command 1: unpigz -p <cores> <archive_path> (reads file, decompresses to stdout)
+            # Command 2: tar -xf - -C <final_base_path> (reads uncompressed data from stdin, extracts)
+            
+            unpigz_command = ["unpigz", "-p", "4", "-c", str(final_archive_path)] # -c: write to stdout
+            tar_command = ["tar", "-xf", "-", "-C", str(final_base_path)] # -f -: read from stdin
+
+            subprocess.run(
+                f"{' '.join(unpigz_command)} | {' '.join(tar_command)}",
+                check=True, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            logger.info(f"Finished decompressing with unpigz: {desc}.")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error decompressing {desc} on final destination: {e}")
+            continue
+
+        # --- D. Clean up Archives on Scratch and Final ---
+        # Cleanup scratch directory after successful sync/decompression
+        try:
+            shutil.rmtree(scratch_dir_path)
+            scratch_archive_path.unlink(missing_ok=True)
+            final_archive_path.unlink(missing_ok=True)
+            logger.info(f"Cleaned up scratch directory and all archive files for {desc}.")
+        except Exception as e:
+            logger.error(f"Error cleaning up files for {desc}: {e}")
 
 
 # --- Segmentation specific functions ---

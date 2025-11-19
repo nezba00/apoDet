@@ -14,6 +14,7 @@ class Upsampling:
     def __init__(self, config):
         self.config = config
         self.parent_dir = config['PARENT_DIR']
+        self.scratch_dir = config['SCRATCH_DIR']
         self.target_size = tuple(config.get('TARGET_SIZE', (128, 128)))
         self.class_mappings = config['CLASS_MAPPINGS']
 
@@ -59,7 +60,7 @@ class Upsampling:
         
         # 1. Define the full, root paths for I/O based on PARENT_DIR and BASE_NAME
         # self.parent_dir is the full data path (Path object)
-        input_base_path = os.path.join(self.parent_dir, self.input_base_dir_name)
+        input_base_path = os.path.join(self.scratch_dir, self.input_base_dir_name)
         output_base_path = os.path.join(self.parent_dir, self.output_base_dir_name)
         
         # Ensure the overall output base directory exists

@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import tifffile as tiff
 from skimage import measure
+from skimage.transform import resize
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
@@ -15,7 +16,7 @@ from .utils import (
     check_temporal_compatibility, 
     crop_window,
     block_window_in_array,
-    get_experiment_info
+    get_experiment_info,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,8 +41,11 @@ class Cropping:
         self.config = config
         self.plot_dir = config['PLOT_DIR']
         self.run_name = config['RUN_NAME']
+
+        self.target_size = tuple(config.get('TARGET_SIZE', (128, 128)))
         
         # Directory Paths (Access via config)
+        self.base_data_dir = config['BASE_DATA_DIR']
         self.crops_dir = config['CROPS_DIR']
         self.windows_dir = config['WINDOWS_DIR']
         self.windows_dir_20x = config['WINDOWS_DIR_20X']
@@ -49,6 +53,7 @@ class Cropping:
         self.features_dir = config['FEATURES_DIR']
         self.apo_check_array_dir = config['APO_CHECK_ARRAY_DIR']
         self.upsample_dir = config['UPSAMPLE_DIR']
+        self.base_upsample_dir = config['BASE_UPSAMPLE_DIR']
 
 
         # Lists and counters (will be updated during processing)
@@ -133,6 +138,9 @@ class Cropping:
         os.makedirs(os.path.join(window_dir, 'apo'), exist_ok=True)
         os.makedirs(os.path.join(window_dir, 'no_apo'), exist_ok=True)
         os.makedirs(os.path.join(window_dir, 'random'), exist_ok=True)
+        os.makedirs(os.path.join(self.upsample_dir, 'apo'), exist_ok=True)
+        os.makedirs(os.path.join(self.upsample_dir, 'no_apo'), exist_ok=True)
+
 
         # Initialize tracking variables
         merged_df_long['apoptotic'] = 0
@@ -140,6 +148,7 @@ class Cropping:
 
         # Initialize Crop Counter
         self.track_crop_counter = {}
+        self.metadata_rows = []
         
         # --- Run the three main cropping stages ---
         
@@ -527,11 +536,11 @@ class Cropping:
                 windows = []
                 
                 # Extract and check window dimensions (size check is redundant if _find... is perfect)
-                for _, sc_row in positions_to_crop_df.iterrows():
+                for sc_row in positions_to_crop_df.itertuples(index=False):
                     window = crop_window(
-                        imgs[int(sc_row['t'])],
-                        int(sc_row['x']),
-                        int(sc_row['y']),
+                        imgs[int(sc_row.t)],
+                        int(sc_row.x),
+                        int(sc_row.y),
                         window_size
                     )
                     windows.append(window)
@@ -540,7 +549,8 @@ class Cropping:
                 assert len(windows) == MIN_REQUIRED_LENGTH and all(w.shape == (window_size, window_size) for w in windows), \
                     "CRITICAL ERROR: Sequence validation failed after sampling!"
                 
-                sub_windows = np.asarray(windows)
+                windows = np.asarray(windows)
+                windows_transposed = windows.transpose(1, 2, 0)
                 current_track_id = int(current_track_id)
 
                 # --- File Naming and Saving ---
@@ -557,14 +567,24 @@ class Cropping:
                 )
 
                 target_path = os.path.join(window_dir, 'apo', final_name)
-                target_path_upsampled = os.path.join(self.upsample_dir, 'apo', final_name)
-                tiff.imwrite(target_path, sub_windows.transpose(1, 2, 0))
+                tiff.imwrite(target_path, windows_transposed)
+
+                scratch_path_upsampled = os.path.join(self.upsample_dir, 'apo', final_name)
+                base_path_upsampled = os.path.join(self.base_upsample_dir, 'apo', final_name)
+                num_channels = windows_transposed.shape[-1]    # Resize the image while preserving all channels
+                resized_img = resize(windows_transposed, (*self.target_size, num_channels), 
+                                    anti_aliasing=True, 
+                                    preserve_range=True)
+                    
+                resized_img = resized_img.astype(windows_transposed.dtype)
+                tiff.imwrite(scratch_path_upsampled, resized_img)
+
 
                 # Save Metadata for Downstream Analysis
                 start_row = positions_to_crop_df.iloc[0]
                 
                 self.metadata_rows.append({
-                    'file_path': os.path.abspath(target_path_upsampled),
+                    'file_path': os.path.abspath(base_path_upsampled),
                     'filename': filename,
                     'track_id': current_track_id,
                     't_start': int(start_row['t']),       # Starting frame time
@@ -592,7 +612,7 @@ class Cropping:
         logger.info(f"\t\tValid crops of apo cells found for {num_apo_crops} crops from {num_successful_tracks}/{len(apo_annotations)} tracks.")
         logger.info(f"\t\tNum annotations with no match: {num_no_match}")
         logger.info(f"\t\tNum tracks too short: {num_track_too_short}")
-        logger.info(f"\t\tNum tracks skipped (spatial/temporal): {num_skipped_tracks}")
+        logger.info(f"\t\tNum tracks skipped: {num_skipped_tracks}. Reason: No valid crops found (Track too short/spatial bounds failed)")
 
         return apo_track_ids, {
             'num_apo_crops': num_apo_crops,
@@ -704,8 +724,8 @@ class Cropping:
                 crop_start_t = positions_to_crop_df['t'].min()
 
                 # --- Create Single-Cell Crop ---
-                for _, sc_row in positions_to_crop_df.iterrows():
-                    current_t, current_x, current_y = int(sc_row['t']), int(sc_row['x']), int(sc_row['y'])
+                for sc_row in positions_to_crop_df.itertuples(index=False):
+                    current_t, current_x, current_y = int(sc_row.t), int(sc_row.x), int(sc_row.y)
                     
                     # Blocking Check
                     apo_window = crop_window(apo_check_array[current_t], current_x, current_y, window_size)
@@ -792,22 +812,32 @@ class Cropping:
 
                 # --- 5e. File Saving ---
                 windows = np.asarray(windows)
+                windows_transposed = windows.transpose(1, 2, 0)
 
                 if is_filtered:
-                    tiff.imwrite(os.path.join(self.bad_crops, f'no_apo_{filename}', final_name), windows.transpose(1, 2, 0))
+                    tiff.imwrite(os.path.join(self.bad_crops, f'no_apo_{filename}', final_name), windows_transposed)
                     num_filtered += 1
                 else:
                     # --- Save Good Crop ---
                     target_path = os.path.join(window_dir, 'no_apo', final_name)
-                    tiff.imwrite(target_path, windows.transpose(1, 2, 0))
+                    tiff.imwrite(target_path, windows_transposed)
+                    
+                    scratch_path_upsampled = os.path.join(self.upsample_dir, 'no_apo', final_name)
+                    base_path_upsampled = os.path.join(self.base_upsample_dir, 'no_apo', final_name)
+                    num_channels = windows_transposed.shape[-1]    # Resize the image while preserving all channels
+                    resized_img = resize(windows_transposed, (*self.target_size, num_channels), 
+                                        anti_aliasing=True, 
+                                        preserve_range=True)
+                    
+                    resized_img = resized_img.astype(windows_transposed.dtype)
+                    tiff.imwrite(scratch_path_upsampled, resized_img)
 
                     # Save Metadata for Downstream Analysis
                     start_row = positions_to_crop_df.iloc[0] 
 
-                    target_path_upsampled = os.path.join(self.upsample_dir, 'no_apo', final_name)
 
                     self.metadata_rows.append({
-                        'file_path': os.path.abspath(target_path_upsampled),
+                        'file_path': os.path.abspath(base_path_upsampled),
                         'filename': filename,
                         'track_id': track_id,
                         't_start': int(start_row['t']),       # Starting frame time
@@ -824,7 +854,7 @@ class Cropping:
                     try:
                         if os.path.exists(link_path) or os.path.islink(link_path):
                             os.remove(link_path)
-                        os.symlink(os.path.abspath(target_path), link_path)
+                            os.symlink(os.path.abspath(target_path), link_path)
                     except Exception as e:
                         logger.error(f"Failed to create soft link {link_path}. Error: {e}")
                     

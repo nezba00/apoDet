@@ -13,17 +13,20 @@ from pathlib import Path
 # ==================================
 # GLOBAL & EXTERNAL SETTINGS
 # ==================================
-RUN_NAME = "metadata_test3"
+RUN_NAME = "Exp06_Site37"# "agne_data_50x_trk_wt"
 
 # 1. Base Project Directories (Relative to execution)
 BASE_DATA_DIR = Path("./data") / RUN_NAME
 BASE_LOG_DIR = Path("./logs") / RUN_NAME
+SCRATCH_DIR = None
+#SCRATCH_DIR = Path("/scratch/nbahou") / RUN_NAME  # or None if no scratch
+
 
 # 2. External Absolute Paths (Must be manually updated for new environments)
 EXTERNAL_PATHS = {
-    'EXPERIMENT_INFO_CSV': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',
-    'APO_ANNOTATIONS_DIR': '/mnt/imaging.data/PertzLab/apoDetection/ApoptosisAnnotation',
-    'SOURCE_IMAGES_DIR': Path("/home/nbahou/myimaging/test_tiffs/mini"), 
+    'EXPERIMENT_INFO_CSV': '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',#'/home/nbahou/myimaging/data/agne_data/experiment_info.csv',  # '/mnt/imaging.data/PertzLab/apoDetection/List of the experiments.csv',
+    'APO_ANNOTATIONS_DIR': None, # '/mnt/imaging.data/PertzLab/apoDetection/ApoptosisAnnotation',
+    'SOURCE_IMAGES_DIR': Path("/home/nbahou/myimaging/test_tiffs/napari_test2")# Path("/home/nbahou/myimaging/data/agne_data/TIFFS/WT"), 
 }
 
 # 3. Centralized Output Directory Names (Single Source of Truth)
@@ -65,6 +68,7 @@ SEGMENTATION_CONFIG = {
     'DETAILS_DIR': BASE_DATA_DIR / 'details',
     
     # Parameters
+    'TARGET_CHANNEL': 0,
     'MIN_NUC_SIZE': 200,
     'MIN_NUC_SIZE_20x': 100, 
     'USE_GPU': True, 
@@ -111,24 +115,29 @@ APO_MATCH_CONFIG = {
 # 4. Apoptosis Window Cropping
 # ==================================
 APO_CROP_CONFIG = {
-    'UPSAMPLE_DIR': BASE_DATA_DIR / OUTPUT_DIRS['WINDOW_CROPS_UPSAMPLED'],
+    'BASE_DATA_DIR': BASE_DATA_DIR,
+    'SCRATCH_DIR': SCRATCH_DIR,
+    # Heavy I/O written to scratch if available
+    'UPSAMPLE_DIR': (SCRATCH_DIR or BASE_DATA_DIR) / OUTPUT_DIRS['WINDOW_CROPS_UPSAMPLED'],
+    'WINDOWS_DIR': (SCRATCH_DIR or BASE_DATA_DIR) / OUTPUT_DIRS['WINDOW_CROPS_BASE'],
+    'WINDOWS_DIR_20X': (SCRATCH_DIR or BASE_DATA_DIR) / OUTPUT_DIRS['WINDOW_CROPS_20X_BASE'],
     # Output Directories (Final Products)
-    'WINDOWS_DIR': BASE_DATA_DIR / OUTPUT_DIRS['WINDOW_CROPS_BASE'],
-    'WINDOWS_DIR_20X': BASE_DATA_DIR / OUTPUT_DIRS['WINDOW_CROPS_20X_BASE'],
+    'BASE_UPSAMPLE_DIR': BASE_DATA_DIR / OUTPUT_DIRS['WINDOW_CROPS_UPSAMPLED'],
     'CROPS_DIR': BASE_DATA_DIR / OUTPUT_DIRS['CROPS_DIR'],
     'BAD_CROPS': BASE_DATA_DIR / OUTPUT_DIRS['REJECTED_CROPS'],
     'FEATURES_DIR': BASE_DATA_DIR / OUTPUT_DIRS['FILTER_FEATURES'],
     'APO_CHECK_ARRAY_DIR': BASE_DATA_DIR / OUTPUT_DIRS['APO_CHECK_ARRAYS'],
     'PLOT_DIR': BASE_DATA_DIR / OUTPUT_DIRS['PLOTS'],
-    
+
     # Parameters
     'RUN_NAME': RUN_NAME,
     'MAX_TRACKING_DURATION': 20,
     'FRAME_INTERVAL': 5,
     'WINDOW_SIZE': 48,
     'WINDOW_SIZE_20X': 32,
-    'CROPS_PER_TRACK_APO': 3,
-    'CROPS_PER_TRACK_HEALTHY': 2,
+    'TARGET_SIZE': (128, 128),
+    'CROPS_PER_TRACK_APO': -1,
+    'CROPS_PER_TRACK_HEALTHY': -1,
     # Filtering
     'ENABLE_QC': False,
     'ECCENTRICITY_THR': 0.35,
@@ -144,7 +153,9 @@ APO_CROP_CONFIG = {
 # ==================================
 UPSAMPLING_CONFIG = {
     'PARENT_DIR': BASE_DATA_DIR,
+    'SCRATCH_DIR': SCRATCH_DIR if SCRATCH_DIR is not None else BASE_DATA_DIR,
     'TARGET_SIZE': (128, 128),
+    'NUM_WRITER_THREADS': 8,
 
     # INPUT: Dynamically generated from the Cropping output base
     'INPUT_WINDOW_DIR_BASE': OUTPUT_DIRS['WINDOW_CROPS_20X_BASE'], 
