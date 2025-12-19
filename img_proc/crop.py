@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import tifffile as tiff
 from skimage import measure
-from skimage.transform import resize
+# from skimage.transform import resize
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
@@ -42,7 +42,7 @@ class Cropping:
         self.plot_dir = config['PLOT_DIR']
         self.run_name = config['RUN_NAME']
 
-        self.target_size = tuple(config.get('TARGET_SIZE', (128, 128)))
+        # self.target_size = tuple(config.get('TARGET_SIZE', (128, 128)))
         
         # Directory Paths (Access via config)
         self.base_data_dir = config['BASE_DATA_DIR']
@@ -52,8 +52,6 @@ class Cropping:
         self.bad_crops = config['BAD_CROPS']
         self.features_dir = config['FEATURES_DIR']
         self.apo_check_array_dir = config['APO_CHECK_ARRAY_DIR']
-        self.upsample_dir = config['UPSAMPLE_DIR']
-        self.base_upsample_dir = config['BASE_UPSAMPLE_DIR']
 
 
         # Lists and counters (will be updated during processing)
@@ -73,7 +71,6 @@ class Cropping:
             self.crops_dir, self.windows_dir, 
             self.bad_crops, self.features_dir, 
             self.apo_check_array_dir, self.windows_dir_20x,
-            self.upsample_dir
         ]
         for path in output_dirs:
             os.makedirs(path, exist_ok=True)
@@ -138,8 +135,6 @@ class Cropping:
         os.makedirs(os.path.join(window_dir, 'apo'), exist_ok=True)
         os.makedirs(os.path.join(window_dir, 'no_apo'), exist_ok=True)
         os.makedirs(os.path.join(window_dir, 'random'), exist_ok=True)
-        os.makedirs(os.path.join(self.upsample_dir, 'apo'), exist_ok=True)
-        os.makedirs(os.path.join(self.upsample_dir, 'no_apo'), exist_ok=True)
 
 
         # Initialize tracking variables
@@ -189,7 +184,7 @@ class Cropping:
         if self.metadata_rows:
             metadata_df = pd.DataFrame(self.metadata_rows)
             output_csv_path = os.path.join(
-                self.upsample_dir,      # Save where the upsampled output is saved
+                window_dir,
                 f'metadata_{filename}.csv'
             )
             metadata_df.to_csv(output_csv_path, index=False)
@@ -569,22 +564,12 @@ class Cropping:
                 target_path = os.path.join(window_dir, 'apo', final_name)
                 tiff.imwrite(target_path, windows_transposed)
 
-                scratch_path_upsampled = os.path.join(self.upsample_dir, 'apo', final_name)
-                base_path_upsampled = os.path.join(self.base_upsample_dir, 'apo', final_name)
-                num_channels = windows_transposed.shape[-1]    # Resize the image while preserving all channels
-                resized_img = resize(windows_transposed, (*self.target_size, num_channels), 
-                                    anti_aliasing=True, 
-                                    preserve_range=True)
-                    
-                resized_img = resized_img.astype(windows_transposed.dtype)
-                tiff.imwrite(scratch_path_upsampled, resized_img)
-
 
                 # Save Metadata for Downstream Analysis
                 start_row = positions_to_crop_df.iloc[0]
                 
                 self.metadata_rows.append({
-                    'file_path': os.path.abspath(base_path_upsampled),
+                    'file_path': os.path.abspath(target_path),
                     'filename': filename,
                     'track_id': current_track_id,
                     't_start': int(start_row['t']),       # Starting frame time
@@ -822,22 +807,12 @@ class Cropping:
                     target_path = os.path.join(window_dir, 'no_apo', final_name)
                     tiff.imwrite(target_path, windows_transposed)
                     
-                    scratch_path_upsampled = os.path.join(self.upsample_dir, 'no_apo', final_name)
-                    base_path_upsampled = os.path.join(self.base_upsample_dir, 'no_apo', final_name)
-                    num_channels = windows_transposed.shape[-1]    # Resize the image while preserving all channels
-                    resized_img = resize(windows_transposed, (*self.target_size, num_channels), 
-                                        anti_aliasing=True, 
-                                        preserve_range=True)
-                    
-                    resized_img = resized_img.astype(windows_transposed.dtype)
-                    tiff.imwrite(scratch_path_upsampled, resized_img)
 
                     # Save Metadata for Downstream Analysis
                     start_row = positions_to_crop_df.iloc[0] 
 
-
                     self.metadata_rows.append({
-                        'file_path': os.path.abspath(base_path_upsampled),
+                        'file_path': os.path.abspath(target_path),
                         'filename': filename,
                         'track_id': track_id,
                         't_start': int(start_row['t']),       # Starting frame time
