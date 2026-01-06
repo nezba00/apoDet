@@ -10,6 +10,7 @@ from tqdm import tqdm
 import tifffile as tiff
 from nd2reader import ND2Reader
 
+
 # Plots
 import matplotlib.pyplot as plt
 
@@ -20,6 +21,7 @@ from skimage.morphology import remove_small_objects
 # Tracking specific
 import btrack
 from btrack.constants import BayesianUpdates
+from scipy.spatial.distance import cdist
 
 
 logger = logging.getLogger(__name__)
@@ -600,67 +602,56 @@ def plot_track_lengths(merged_df, min_len, filename, output_dir, run_name):
 
 def fill_track_gaps_vectorized(df, distance_threshold=50):
     """
-    Fills NaN track_ids using a fast, vectorized pandas approach.
+    Fills NaN track_ids processing frame-by-frame to avoid OOM.
+    Uses float32 and scipy cdist for speed and lower memory usage.
     """
-    # 1. Separate data into rows with gaps and rows with valid track_ids (candidates)
-    gaps_df = df[df['track_id'].isna()].copy()
-    if gaps_df.empty:
+    # Early exit if no gaps
+    is_gap = df['track_id'].isna()
+    if not is_gap.any():
         return df
+    
+    
+    # Get frames with gaps
+    gap_times = df.loc[is_gap, 't'].unique()
+    
+    # Pre-filter candidates (only keep rows with valid track_ids)
+    candidates_df = df.loc[~is_gap, ['x', 'y', 't', 'track_id']].copy()
+    
+    # Store assignments
+    new_assignments = {}
+    
+    # Process each frame with gaps
+    for t in gap_times:
+        # Get gaps at time t
+        current_gaps = df.loc[(df['t'] == t) & is_gap]
         
-    candidates_df = df[df['track_id'].notna()].copy()
-
-    # Store original index to use for the final assignment
-    gaps_df['original_index'] = gaps_df.index
-
-    # 2. Create lookup tables for matching
-    # Candidates for matching from the PREVIOUS frame (t-1)
-    # We add 1 to their time 't' so they can be merged with a gap at 't'.
-    forward_candidates = candidates_df.copy()
-    forward_candidates['t'] = forward_candidates['t'] + 1
+        # Get candidates from adjacent frames
+        current_candidates = candidates_df[candidates_df['t'].isin([t - 1, t + 1])]
+        
+        if current_candidates.empty:
+            continue
+        
+        # Vectorized distance calculation
+        gap_coords = current_gaps[['x', 'y']].values
+        cand_coords = current_candidates[['x', 'y']].values
+        dists = cdist(gap_coords, cand_coords, metric='euclidean')
+        
+        # Find nearest neighbor for each gap
+        min_idxs = np.argmin(dists, axis=1)
+        min_dists = dists[np.arange(len(gap_coords)), min_idxs]
+        
+        # Apply threshold and store assignments
+        valid_mask = min_dists < distance_threshold
+        gap_indices = current_gaps.index[valid_mask]
+        matched_track_ids = current_candidates.iloc[min_idxs[valid_mask]]['track_id'].values
+        
+        for idx, track_id in zip(gap_indices, matched_track_ids):
+            new_assignments[idx] = track_id
     
-    # Candidates for matching from the NEXT frame (t+1)
-    # We subtract 1 from their time 't' so they can be merged with a gap at 't'.
-    backward_candidates = candidates_df.copy()
-    backward_candidates['t'] = backward_candidates['t'] - 1
-
-    # Combine them into one big lookup table
-    all_candidates = pd.concat([forward_candidates, backward_candidates])
-
-    # 3. Merge gaps with all possible candidates from adjacent frames
-    # This creates a DataFrame of all potential pairs.
-    merged_df = pd.merge(
-        gaps_df, 
-        all_candidates, 
-        on='t', 
-        suffixes=('_gap', '_candidate')
-    )
-
-    # 4. Calculate distance for all pairs AT ONCE (vectorized)
-    merged_df['distance'] = np.sqrt(
-        (merged_df['x_gap'] - merged_df['x_candidate'])**2 +
-        (merged_df['y_gap'] - merged_df['y_candidate'])**2
-    )
-
-    # 5. Filter out pairs that are beyond the distance threshold
-    valid_matches = merged_df[merged_df['distance'] < distance_threshold].copy()
-
-    if valid_matches.empty:
-        return df # No valid matches found
-
-    # 6. Find the BEST match (minimum distance) for each original gap
-    # Sort by distance to ensure the first entry for each gap is the best one
-    valid_matches = valid_matches.sort_values('distance', ascending=True)
-    # Get the first (and therefore best) match for each original gap index
-    best_matches = valid_matches.drop_duplicates(subset=['original_index'])
-    
-    # Create a Series of the track_ids to assign, indexed by the original gap index
-    assignments = pd.Series(
-        best_matches['track_id_candidate'].values, 
-        index=best_matches['original_index']
-    )
-
-    # 7. Apply the new assignments to the original DataFrame
-    df['track_id'] = df['track_id'].fillna(assignments)
+    # Apply all assignments at once
+    if new_assignments:
+        assignment_series = pd.Series(new_assignments)
+        df.loc[assignment_series.index, 'track_id'] = assignment_series.values
     
     return df
 
