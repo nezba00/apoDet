@@ -254,15 +254,24 @@ class Cropping:
         Returns:
         - valid_crops: List with DataFrames with the validated rows. Empty if no valid series is found.
         """
+        # Get track_id
+        track_id = single_cell_df['track_id'].iloc[0] if not single_cell_df.empty else "N/A"
+
         # First remove t0 because of bad tracking quality in first frame
         single_cell_df = single_cell_df[single_cell_df['t'] != 0].copy()
+
+        if single_cell_df.empty:
+                logger.warning(f"Track: {track_id} only detected in first frame.")
+                results_dict = {'track_too_short': True, 
+                            'num_spatial_rejections': 0,
+                            'num_temporal_rejections': 0
+                        }
+                return [], results_dict
 
         track_data = single_cell_df[['t', 'x', 'y']].values # Convert to a NumPy array for speed
         time_to_index = {t: i for i, t in enumerate(track_data[:, 0])}
         min_t, max_t = track_data[:, 0].min(), track_data[:, 0].max()
         present_time_points = set(np.unique(track_data[:, 0]))
-
-        track_id = single_cell_df['track_id'].iloc[0] if not single_cell_df.empty else "N/A"
 
 
         # available_track_length = len(single_cell_df)
@@ -377,9 +386,6 @@ class Cropping:
         # 2. Determine the sampling indices based on strategy
         if prioritize_first:
             # Strategy A: APO - Always include index 0, sample N-1 from the rest.
-            
-            # If n_samples is 1, random.sample will correctly return an empty list.
-            # If n_samples > 1, sample n_samples - 1 from the remaining indices.
             other_indices = random.sample(range(1, list_length), n_samples - 1)
             indices = [0] + other_indices
         else:
@@ -470,12 +476,26 @@ class Cropping:
                 continue
 
             # 2. Extract Single Track Data
+            # Extract single Track
             is_correct_track = merged_df_long['track_id'] == current_track_id
-            is_valid_time = merged_df_long['t'] >= current_t
-            single_cell_df = merged_df_long.loc[is_correct_track & is_valid_time].copy()
-            
+            track_subset = merged_df_long.loc[is_correct_track]
+            if track_subset.empty:
+                # Should not trigger, indicates grave errors during matching
+                # -> Track_ID assigned to an annotation not present in the data
+                logger.error(
+                    f"Track_ID {current_track_id} fully missing from main DF."
+                )
+                continue
+
+            # Only keep timepoints >= apo_annotation
+            is_valid_time = track_subset['t'] >= current_t
+            single_cell_df = track_subset.loc[is_valid_time].copy()
             if single_cell_df.empty:
-                logger.warning(f"Track: {current_track_id} not found in csv.")
+                # This should not trigger, indicates errors during matching
+                # -> Match not present at annotated_t or later t
+                logger.error(
+                    f"Track_ID {current_track_id} ends before annot_t={current_t}."
+                )
                 continue
 
             # Update Global State (mark cells as apo in df + update stats)
@@ -673,6 +693,10 @@ class Cropping:
             single_cell_df = long_no_apo_df.loc[
                 long_no_apo_df['track_id'] == track_id
             ].copy()
+
+            if single_cell_df.empty:
+                logger.warning(f"Track: {track_id} not found in csv.")
+                continue
 
             # --- 4a. Find Valid Sequences ---
             valid_crops_list, status_dict = self._find_valid_crop_sequences(

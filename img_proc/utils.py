@@ -791,7 +791,7 @@ def match_annotations(apo_annotations, details, tracked_masks, gt_filtered, dt_a
             delta_ts.append(0)
             num_matches += 1
         else:
-            t_start = max(0, t - 3)
+            t_start = t
             t_end = min(t + 3 + 1, tracked_masks.shape[0])
             previous_frames = tracked_masks[t_start:t_end, y, x]
             if previous_frames.size > 0:
