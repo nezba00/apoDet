@@ -91,7 +91,8 @@ class Matching:
             logger.info(f"\t\t{success_rate:.2f}% Success Rate")
 
             # Apply multiplier to time column for later analysis (only for successful match data)
-            apo_annotations_match['correct_t'] = apo_annotations_match['t'] * multiplier
+            # -1 because of 1 indexing in manual annotations!
+            apo_annotations_match['correct_t'] = (apo_annotations_match['t'] - 1) * multiplier
 
             # Save output (only for successful match data)
             output_path = os.path.join(self.csv_dir, f'{filename}.csv')

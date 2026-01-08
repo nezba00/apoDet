@@ -757,9 +757,9 @@ def match_annotations(apo_annotations, details, tracked_masks, gt_filtered, dt_a
     -----
     - Assumes `details[t]['points']` provides (y, x) coordinates for centroids.
     - Assumes `obj_id`s in `gt_filtered` are 1-based for indexing into `details[t]['points']`.
-    - Manual annotation time ('t') is adjusted: `t * dt_annots - 1` to align
+    - Manual annotation time ('t') is adjusted: `(t-1) * dt_annots` to align
       with 0-indexed segmentation frames.
-    - The temporal search window for a match is fixed to +/- 3 frames.
+    - The temporal search window for a match is fixed to +3 frames.
     """
     delta_ts = []
     corresponding_objs = []
@@ -774,8 +774,8 @@ def match_annotations(apo_annotations, details, tracked_masks, gt_filtered, dt_a
     # Loop over each annotation
     for _, row in tqdm(apo_annotations.iterrows(), total=len(apo_annotations), desc="Processing Annotations"):
         t, x, y = int(row['t']), int(row['x']), int(row['y'])
-        t *= dt_annots
-        t -= 1  # because of 0 indexing
+        # -1 because of 1 indexing in annotations!
+        t = (t - 1) * dt_annots
         centroids = np.array(details[t]['points'])  # Convert list to NumPy array
         
         # Compute Euclidean distances
@@ -810,7 +810,7 @@ def match_annotations(apo_annotations, details, tracked_masks, gt_filtered, dt_a
                 num_matches += 1
 
             # Search adjacent frames for a matching track
-            for delta in [0, 1, -1, 2, -2, 3, -3]:
+            for delta in [0, 1, 2, 3]:
                 if (t + delta) in range(t_start, t_end):
                     if tracked_masks[t + delta, y, x] == match_id:
                         corresponding_tracks.append(match_id)
