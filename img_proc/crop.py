@@ -114,10 +114,7 @@ class Cropping:
         num_timepoints = self.config['MAX_TRACKING_DURATION'] // self.config['FRAME_INTERVAL']
 
         # 2. Load DataFrames
-        track_sizes = merged_df.groupby("track_id")["track_id"].transform('size')
-        required_frames = (self.config['FRAME_INTERVAL'] // acquisition_freq) * (num_timepoints + 1)
-        merged_df_long = merged_df[track_sizes >= required_frames].copy()
-        logger.info(f"\tUsing min track length of {required_frames} frames.")
+        merged_df_long = merged_df.copy()
 
         # 3. Magnification and Window Size Setup
         exp_info = get_experiment_info(filename, experiments_list)
