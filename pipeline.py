@@ -286,6 +286,23 @@ def main():
     finalize_end_time = time.time()
     logger.info(f"Finalize Time: {finalize_end_time - finalize_start_time:.2f} seconds.")
 
+    # --- Aggregate and Save Master Metrics ---
+    logger.info("Aggregating and saving master pipeline metrics.")
+    try:
+        if master_file_summaries:
+            # Convert the list of file-specific dictionaries into one DataFrame
+            metrics_df = pd.DataFrame(master_file_summaries)
+            
+            # Save in main output directory
+            metrics_path = os.path.join(BASE_DATA_DIR, "per_experiment_metrics.csv")
+            metrics_df.to_csv(metrics_path, index=False)
+            logger.info(f"Successfully saved master pipeline metrics to: {metrics_path}")
+        else:
+            logger.warning("Master file summaries list is empty. No metrics DataFrame saved.")
+            
+    except Exception as e:
+        logger.error(f"FATAL ERROR: Could not convert or save master metrics: {e}", exc_info=True)
+
     try:
         sync_scratch_dirs(APO_CROP_CONFIG)
         logger.info("Scratch directories successfully synced to final destination.")
