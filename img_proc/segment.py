@@ -59,14 +59,14 @@ class Segmentation:
         
         if not exp_info['found'] or magnification == '40x':
             min_nuc_size = self.min_nuc_size_40x
-            logger.info(f"\t\tUsing 40x minimum size threshold: {min_nuc_size}")
+            logger.info(f"Using 40x minimum size threshold: {min_nuc_size}")
         elif magnification == '20x':
             min_nuc_size = self.min_nuc_size_20x
-            logger.info(f"\t\tUsing 20x minimum size threshold: {min_nuc_size}")
+            logger.info(f"Using 20x minimum size threshold: {min_nuc_size}")
         else:
             # Fallback for unexpected magnification
             min_nuc_size = self.min_nuc_size_40x
-            logger.warning(f"\t\tUnexpected magnification '{exp_info['magnification']}'. Falling back to 40x size: {min_nuc_size}")
+            logger.warning(f"Unexpected magnification '{exp_info['magnification']}'. Falling back to 40x size: {min_nuc_size}")
             
         return min_nuc_size, magnification
 
@@ -112,22 +112,21 @@ class Segmentation:
         """
         Logs the most important segmentation statistics in a readable format.
         """
-        logger.info("--- Segmentation Summary ---")
+        logger.info("~ Segmentation Summary ~")
         logger.info(f"File: {metrics['filename']}")
         logger.info(f"Frames Processed: {metrics['count_frames_processed']}")
-        logger.info(f"Min Area Threshold: {metrics['min_area_thr']} px")
-        logger.info("----------------------------")
+        logger.info(f"Min Area Thr: {metrics['min_area_thr']} px")
+        logger.info("~~~~~~~~~~~~~~~~~~~~~~~~")
         
         # Calculate percentage and counts
         p_removed = metrics['p_objs_removed'] * 100
         
-        logger.info(f"Objects Found (Initial): {metrics['count_total_objs_unfiltered']:,}")
-        logger.info(f"Objects Retained (Final): {metrics['count_total_objs_filtered']:,}")
-        
-        logger.warning(
-            f"LOSS: {metrics['count_objs_removed']:,} objects removed ({p_removed:.2f}%) due to size filter."
+        logger.info(f"Objects Found: {metrics['count_total_objs_unfiltered']:,}")
+        logger.info(f"Objects Retained: {metrics['count_total_objs_filtered']:,}")
+        logger.info(
+            f"LOSS: {metrics['count_objs_removed']:,} objects removed ({p_removed:.2f}%)."
         )
-        logger.info("----------------------------")     
+        logger.info("~~~~~~~~~~~~~~~~~~~~~~~~")     
 
     def count_objs_per_frame(self, mask):
         num_objects = 0
@@ -151,7 +150,7 @@ class Segmentation:
             - details: List of dictionaries with full StarDist results.
             - segmentation_metrics: Information about segmentation as dict
         """
-        logger.info(f"Processing {filename}: Starting Stardist segmentation.")
+        logger.info(f"--- Segmentation ---")
         
         # 1. Run Segmentation (uses helper from utils)
         # Note: run_segmentation requires the model instance
@@ -185,12 +184,12 @@ class Segmentation:
         no_filt_path = os.path.join(self.mask_dir_no_filt, f'{filename}.npz')
         np.savez_compressed(no_filt_path, gt=gt_unfiltered)
         np.savez_compressed(mask_path, gt=gt_filtered)
-        logger.info(f"\t\tFiltered Mask saved at: {mask_path}")
+        logger.debug(f"Filtered Mask saved at: {mask_path}")
 
         # Save summary df
         df_path = os.path.join(self.df_dir, f'{filename}_pd_df.csv')
         summary_df.to_csv(df_path, index=False)
-        logger.info(f"\t\tSummary-Df saved at: {df_path}")
+        logger.debug(f"Summary-Df saved at: {df_path}")
 
         # Save Stardist details
         details_path = os.path.join(self.details_dir, f'{filename}.pkl')
@@ -198,5 +197,5 @@ class Segmentation:
             # We need the pickle module here
             import pickle 
             pickle.dump(details, f)
-        logger.info(f"\t\tDetails saved at: {details_path}")
+        logger.debug(f"Details saved at: {details_path}")
     

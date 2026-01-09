@@ -172,7 +172,7 @@ def get_experiment_info(filename, experiments_list):
         result['tracking_freq'] = exp_row['Tracking_frequency'].values[0]
         result['apo_annotation_freq'] = exp_row['Apo_annotation_frequency(min)'].values[0]
         
-        logger.info(f"\t\tFound experiment {exp_name} in experiment info.")
+        logger.debug(f"Found experiment {exp_name} in experiment info.")
     
     return result
 
@@ -352,7 +352,7 @@ def filter_segmentation(gt, details, min_size):
         'x' (float): X-coordinate (column index) of the object's centroid.
         'y' (float): Y-coordinate (row index) of the object's centroid.
     """
-    logger.info(f"\tRemoving objects smaller than {min_size}.")
+    logger.debug(f"Removing objects smaller than {min_size}.")
     num_frames = gt.shape[0]
     gt_filtered = np.zeros_like(gt, dtype=np.uint16)
     df_list = []
@@ -370,7 +370,7 @@ def filter_segmentation(gt, details, min_size):
         current_df = pd.DataFrame({'obj_id': unique_ids, 't': timepoint, 'x': x, 'y': y})
         df_list.append(current_df)
     summary_df = pd.concat(df_list, ignore_index=True)
-    logging.info("\t\tDone!")
+    logging.debug("\tDone!")
     return gt_filtered, summary_df
 
 

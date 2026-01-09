@@ -123,13 +123,13 @@ def main():
     for path in output_dirs_to_create:
         # path is a pathlib.Path object, os.makedirs handles it correctly
         os.makedirs(path, exist_ok=True)
-        logger.info(f"Ensured directory exists: {path}")
+        logger.debug(f"Ensured directory exists: {path}")
 
     # 4. Load Global Data Dependencies (Experiment List)
     try:
         # Using the defined GLOBAL_EXPERIMENT_INFO_PATH
         experiments_list = pd.read_csv(GLOBAL_EXPERIMENT_INFO_PATH, header=0)
-        logger.info(f"Loaded experiment list from {GLOBAL_EXPERIMENT_INFO_PATH}.")
+        logger.debug(f"Loaded experiment list from {GLOBAL_EXPERIMENT_INFO_PATH}.")
     except FileNotFoundError:
         logger.critical(f"Critical error: experiment list not found at {GLOBAL_EXPERIMENT_INFO_PATH}. Aborting.")
         sys.exit(1)
@@ -158,7 +158,7 @@ def main():
     master_file_summaries = []
 
     for path, filename in zip(image_paths, filenames):
-        logger.info(f"--- Running Pipeline for {filename} ---")
+        logger.info(f"=== Running Pipeline for {filename} ===")
         # Initialize per file metrics
         metrics_dict = {'filename': filename}
 
@@ -207,7 +207,7 @@ def main():
             metrics_dict['segmentation_status'] = 'FAIL'
             metrics_dict['error'] = str(e)
             continue    # Skip to next file
-        logger.info(f"    - Segmentation Time: {time.time() - stage_start:.2f} seconds.")
+        logger.info(f"Segmentation Time: {time.time() - stage_start:.2f} seconds.")
 
         # --- TRACKING STAGE ---
         stage_start = time.time()
@@ -256,9 +256,9 @@ def main():
                 logger.info(f"Cropping successfully completed for {filename}.")
             except Exception as e:
                 logger.error(f"Error in Cropping for {filename}: {e}", exc_info=True)
-            logger.info(f"    - Cropping (Submission) Time: {time.time() - stage_start:.2f} seconds.")
+            logger.info(f"    - Cropping (Submission) Time: {time.time() - stage_start:.2f} seconds.\n")
         else:
-            logger.warning(f"Skipping Cropping for {filename} due to prior Matching/Tracking failure.")
+            logger.warning(f"Skipping Cropping for {filename} due to prior Matching/Tracking failure.\n")
 
         master_file_summaries.append(metrics_dict)
 
