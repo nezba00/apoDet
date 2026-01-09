@@ -55,11 +55,12 @@ class Segmentation:
         Selects the minimum nucleus size based on image magnification.
         """
         exp_info = get_experiment_info(filename, experiments_list)
+        magnification = exp_info['magnification']
         
-        if not exp_info['found'] or exp_info['magnification'] == '40x':
+        if not exp_info['found'] or magnification == '40x':
             min_nuc_size = self.min_nuc_size_40x
             logger.info(f"\t\tUsing 40x minimum size threshold: {min_nuc_size}")
-        elif exp_info['magnification'] == '20x':
+        elif magnification == '20x':
             min_nuc_size = self.min_nuc_size_20x
             logger.info(f"\t\tUsing 20x minimum size threshold: {min_nuc_size}")
         else:
@@ -67,7 +68,72 @@ class Segmentation:
             min_nuc_size = self.min_nuc_size_40x
             logger.warning(f"\t\tUnexpected magnification '{exp_info['magnification']}'. Falling back to 40x size: {min_nuc_size}")
             
-        return min_nuc_size
+        return min_nuc_size, magnification
+
+    def _generate_metrics(
+            self, filename: str, magnification: str, min_area_thr: int,
+            unfiltered_mask, filtered_mask):
+        # --- Set-Up metrics dictionary ---
+        metrics_dict = {
+            'filename': filename,
+            'module_name': 'Segmentation',
+            # Core Validation
+            'count_frames_processed': 0,
+            'magnification': magnification,
+            'min_area_thr': min_area_thr,
+            # Object Counts
+            'count_total_objs_unfiltered': 0, 
+            'count_total_objs_filtered': 0,
+            'count_objs_removed': 0,
+            'p_objs_removed': 0.0, 
+        }
+        # --- Calculate metrics ---
+        # Count num frames
+        num_frames = unfiltered_mask.shape[0]
+        # Count total num objects before and after filtering
+        count_total_unfiltered = self.count_objs_per_frame(unfiltered_mask)
+        count_total_filtered = self.count_objs_per_frame(filtered_mask)
+        # Calculate derived metrics
+        num_objs_removed = count_total_unfiltered - count_total_filtered
+        p_objs_removed = num_objs_removed/count_total_unfiltered
+        # Assign values to metrics dictionary
+        metrics_dict['count_frames_processed'] = num_frames
+        metrics_dict['count_total_objs_unfiltered'] = count_total_unfiltered
+        metrics_dict['count_total_objs_filtered'] = count_total_filtered
+        metrics_dict['count_objs_removed'] = num_objs_removed
+        metrics_dict['p_objs_removed'] = p_objs_removed
+
+        # --- Log stats and return ---
+        self._log_summary_stats(metrics_dict)
+
+        return metrics_dict 
+
+    def _log_summary_stats(self, metrics: dict):
+        """
+        Logs the most important segmentation statistics in a readable format.
+        """
+        logger.info("--- Segmentation Summary ---")
+        logger.info(f"File: {metrics['filename']}")
+        logger.info(f"Frames Processed: {metrics['count_frames_processed']}")
+        logger.info(f"Min Area Threshold: {metrics['min_area_thr']} px")
+        logger.info("----------------------------")
+        
+        # Calculate percentage and counts
+        p_removed = metrics['p_objs_removed'] * 100
+        
+        logger.info(f"Objects Found (Initial): {metrics['count_total_objs_unfiltered']:,}")
+        logger.info(f"Objects Retained (Final): {metrics['count_total_objs_filtered']:,}")
+        
+        logger.warning(
+            f"LOSS: {metrics['count_objs_removed']:,} objects removed ({p_removed:.2f}%) due to size filter."
+        )
+        logger.info("----------------------------")     
+
+    def count_objs_per_frame(self, mask):
+        num_objects = 0
+        for frame in mask:
+            num_objects += len(np.unique(frame)) - 1
+        return num_objects
 
     def process(self, image_data: np.ndarray, filename: str, experiments_list: pd.DataFrame):
         """
@@ -79,11 +145,11 @@ class Segmentation:
             experiments_list: DataFrame with experiment metadata.
 
         Returns:
-            A tuple: (gt_filtered, summary_df, details, gt_unfiltered)
+            A tuple: (gt_filtered, summary_df, details, segmentation_metrics)
             - gt_filtered: Mask stack with small objects removed.
             - summary_df: DataFrame of (obj_id, t, x, y) for filtered objects.
             - details: List of dictionaries with full StarDist results.
-            - gt_unfiltered: Mask stack before size filtering.
+            - segmentation_metrics: Information about segmentation as dict
         """
         logger.info(f"Processing {filename}: Starting Stardist segmentation.")
         
@@ -93,7 +159,7 @@ class Segmentation:
         logger.info("\tSegmentation done.")
 
         # 2. Determine Minimum Size
-        min_nuc_size = self._determine_min_size(filename, experiments_list)
+        min_nuc_size, magnification = self._determine_min_size(filename, experiments_list)
 
         # 3. Filter Segmentation (uses helper from utils)
         gt_filtered, summary_df = filter_segmentation(gt_unfiltered, details, min_nuc_size)
@@ -101,8 +167,14 @@ class Segmentation:
         # 4. Save Data (This step is handled by the Pipeline Orchestrator for clean I/O)
         if self.save_data:
             self._save_outputs(filename, gt_filtered, gt_unfiltered, summary_df, details)
+        
+        # 5. Populate segmentation metrics dictionary
+        segmentation_metrics = self._generate_metrics(
+            filename, magnification, min_nuc_size,
+            gt_unfiltered, gt_filtered,
+        )
 
-        return gt_filtered, summary_df, details, gt_unfiltered
+        return gt_filtered, summary_df, details, segmentation_metrics
 
     def _save_outputs(self, filename, gt_filtered, gt_unfiltered, summary_df, details):
         """
@@ -127,3 +199,4 @@ class Segmentation:
             import pickle 
             pickle.dump(details, f)
         logger.info(f"\t\tDetails saved at: {details_path}")
+    

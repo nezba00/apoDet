@@ -154,16 +154,19 @@ def main():
     # 7. Main Loop
     loop_start_time = time.time()
 
+    # Initialize lists to accumulate metrics for each module
+    master_file_summaries = []
+
     for path, filename in zip(image_paths, filenames):
         logger.info(f"--- Running Pipeline for {filename} ---")
+        # Initialize per file metrics
+        metrics_dict = {'filename': filename}
 
-        # Initialize the default (safe, empty) value
+        # Load Annotations
         apo_annotations = pd.DataFrame(columns=['filename', 'x', 'y', 't']) 
-        
         if not APO_MATCH_CONFIG.get('APO_ANNOTATIONS_DIR'):
             logger.warning(f"Skipping APO annotation loading for {filename}: 'APO_ANNOTATIONS_DIR' is not configured.")
             # apo_annotations remains the safe empty DF. The Matching module will skip.
-            
         else:
             try:
                 # Path to current annotation file
@@ -196,11 +199,14 @@ def main():
         stage_start = time.time()
         try:
             seg_out = segmentation_module.process(imgs, filename, experiments_list)
-            gt_filtered, summary_df, details, gt_unfiltered = seg_out
+            gt_filtered, summary_df, details, segmentation_metrics = seg_out
+            metrics_dict.update(segmentation_metrics)
             logger.info(f"Segmentation complete for {filename}.")
         except Exception as e:
             logger.error(f"Error in Segmentation for {filename}: {e}", exc_info=True)
-            continue
+            metrics_dict['segmentation_status'] = 'FAIL'
+            metrics_dict['error'] = str(e)
+            continue    # Skip to next file
         logger.info(f"    - Segmentation Time: {time.time() - stage_start:.2f} seconds.")
 
         # --- TRACKING STAGE ---
@@ -253,6 +259,8 @@ def main():
             logger.info(f"    - Cropping (Submission) Time: {time.time() - stage_start:.2f} seconds.")
         else:
             logger.warning(f"Skipping Cropping for {filename} due to prior Matching/Tracking failure.")
+
+        master_file_summaries.append(metrics_dict)
 
     loop_end_time = time.time()
     logger.info("Main loop finished. Starting finalization steps.")
