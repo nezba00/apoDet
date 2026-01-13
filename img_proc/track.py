@@ -87,6 +87,17 @@ class Tracking:
 
         merged_df = fill_track_gaps_vectorized(merged_df.copy())
 
+        # Remove detections that couldn't be assigned a track_id
+        initial_count = len(merged_df)
+        merged_df = merged_df.dropna(subset=['track_id'])
+        dropped_count = initial_count - len(merged_df)
+        
+        if dropped_count > 0:
+            logger.info(f"\t\tDropped {dropped_count} orphan detections with no track_id.")
+
+        # Cast to int
+        merged_df['track_id'] = merged_df['track_id'].astype(int)
+
         # -- 5. Convert Masks --
         tracked_masks = convert_obj_to_track_ids(mask_filt, merged_df)
         logger.info("\t\tConverted object IDs to track IDs in masks.")

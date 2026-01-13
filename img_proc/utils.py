@@ -22,6 +22,7 @@ from skimage.morphology import remove_small_objects
 import btrack
 from btrack.constants import BayesianUpdates
 from scipy.spatial.distance import cdist
+from scipy.optimize import linear_sum_assignment
 
 
 logger = logging.getLogger(__name__)
@@ -600,7 +601,7 @@ def plot_track_lengths(merged_df, min_len, filename, output_dir, run_name):
     logger.info(f"\t\tSaved filtered track length histogram: {filename}_track_lengths_long.png")
 
 
-def fill_track_gaps_vectorized(df, distance_threshold=50):
+def fill_track_gaps_vectorized(df, distance_threshold=20):
     """
     Fills NaN track_ids processing frame-by-frame to avoid OOM.
     Uses float32 and scipy cdist for speed and lower memory usage.
@@ -613,10 +614,8 @@ def fill_track_gaps_vectorized(df, distance_threshold=50):
     
     # Get frames with gaps
     gap_times = df.loc[is_gap, 't'].unique()
-    
     # Pre-filter candidates (only keep rows with valid track_ids)
     candidates_df = df.loc[~is_gap, ['x', 'y', 't', 'track_id']].copy()
-    
     # Store assignments
     new_assignments = {}
     
@@ -626,7 +625,8 @@ def fill_track_gaps_vectorized(df, distance_threshold=50):
         current_gaps = df.loc[(df['t'] == t) & is_gap]
         
         # Get candidates from adjacent frames
-        current_candidates = candidates_df[candidates_df['t'].isin([t - 1, t + 1])]
+        search_range = [t-2, t-1, t+1, t+2]
+        current_candidates = candidates_df[candidates_df['t'].isin(search_range)]
         
         if current_candidates.empty:
             continue
@@ -637,16 +637,14 @@ def fill_track_gaps_vectorized(df, distance_threshold=50):
         dists = cdist(gap_coords, cand_coords, metric='euclidean')
         
         # Find nearest neighbor for each gap
-        min_idxs = np.argmin(dists, axis=1)
-        min_dists = dists[np.arange(len(gap_coords)), min_idxs]
+        row_ind, col_ind = linear_sum_assignment(dists)
         
         # Apply threshold and store assignments
-        valid_mask = min_dists < distance_threshold
-        gap_indices = current_gaps.index[valid_mask]
-        matched_track_ids = current_candidates.iloc[min_idxs[valid_mask]]['track_id'].values
-        
-        for idx, track_id in zip(gap_indices, matched_track_ids):
-            new_assignments[idx] = track_id
+        for r, c in zip(row_ind, col_ind):
+            if dists[r, c] < distance_threshold:
+                gap_idx = current_gaps.index[r]
+                track_id = current_candidates.iloc[c]['track_id']
+                new_assignments[gap_idx] = track_id
     
     # Apply all assignments at once
     if new_assignments:
