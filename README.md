@@ -1,4 +1,4 @@
-# Single-Cell Time-Series: Centered Temporal Channel Encoding Pipeline
+# Transforming 2D+T Imaging into Multi-Channel ML Datasets
 
 This repository contains the core pipeline for transforming raw, **mono-channel time-series imaging data** into specialized, **multi-channel single-cell datasets** ready for deep learning training and advanced machine learning analysis. The primary function of this pipeline is to **generate standardized single-cell crops** with explicit temporal context.
 
@@ -7,7 +7,7 @@ This repository contains the core pipeline for transforming raw, **mono-channel 
 The central and most critical feature of this pipeline is its ability to convert single-channel (2D + Time) input images into multi-channel (3D) output windows, specifically optimized for single-cell analysis. This process is essential for leveraging and enriching legacy imaging data:
 
 * **Temporal Stacking:** The pipeline stacks images of the *same individual cell* captured at *different, pre-defined sequential timepoints* along the **channel axis**. If $N$ timepoints are stacked with a time interval $\Delta t$, the original 2D image becomes a 3D volume where the channel dimension is $N$.
-* **Cell Centering:** Each generated crop is precisely **centered on the cell centroid** across all $N$ timepoints. This ensures the cell remains consistently located in the center of the image, allowing deep learning models to focus on subtle morphological and temporal changes rather than cell movement.
+* **Cell Centering:** Each generated crop is **centered on the cell centroid** across all $N$ timepoints. This ensures the cell remains consistently located in the center of the image, allowing deep learning models to focus on subtle morphological and temporal changes rather than cell movement.
 * **Data Enrichment:** This method encodes crucial **temporal context** (e.g., changes over the past $N$ frames) directly into the model's input channels, creating a rich dataset for single-cell analysis.
 * **Legacy Data Enablement:** This process allows existing single-channel image archives to be utilized effectively for advanced projects they were not originally designed for.
 
@@ -38,7 +38,7 @@ This diagram illustrates the flow from raw data acquisition through the core pre
 
 ## Model Compatibility and Feature Extraction Readiness
 
-This pipeline is engineered to generate training data that is immediately compatible with modern and traditional machine learning methods. By encoding temporal sequences into the channel dimension, the data is pre-optimized for efficient feature extraction:
+This pipeline is engineered to generate training data that is compatible with modern and traditional machine learning methods. By encoding temporal sequences into the channel dimension, the data is pre-optimized for efficient feature extraction:
 
 * **Deep Learning (CNNs & Transformers):**
     * **Convolutional Networks (CNNs):** The multi-channel structure allows standard 2D or 3D convolutional layers to simultaneously extract spatial and temporal features.
@@ -63,7 +63,7 @@ The pipeline was validated on an extensive dataset of **219 TIFF files (~420 GB)
 * **Time:** Tracking for all files was completed in approximately **23 hours** (~7 min/file) without parallelization.
 
 ### 3. Annotation Matching
-* **Goal:** Robustly link expert-provided coordinate annotations $(x, y, t)$ to the generated tracks for downstream labeling.
+* **Goal:** Link coordinate annotations $(x, y, t)$ to the generated tracks for downstream labeling.
 * **Method:** Instead of a distance-based approach, a custom method extracts a **temporal vector** centered on the expert annotation and uses a **majority vote** across surrounding frames to assign a stable track ID. This methodology is not well suited for objects that displace by more than one radius in two timesteps.
 * **Success Rate:** Matching 15,632 expert annotations resulted in a success rate of **$>99\\%$ (15,484 matches)**, providing strong external validation of the segmentation and tracking quality.
 * **Time:** The entire matching procedure took approximately **30 minutes** (~0.1 second per annotation).
@@ -97,10 +97,10 @@ Preprocessing of the entire dataset was completed in imately 68 hours in total (
 The output from this preprocessing pipeline served as the foundation for self-supervised training of a model with the **[scDINO framework](https://github.com/JacobHanimann/scDINO)**, which extends **[DINO](https://github.com/facebookresearch/dino)** to more than three channels. This section is only here as an example how the produced data can be utilized , if you are interested in the code go check out the linked repositories.
 
 ### scDINO Training & Analysis Highlights
-* **Unsupervised Feature Extraction:** The temporal channel-encoded crops served as the direct input to the scDINO Vision Transformer (ViT). The model learned rich, self-supervised representations that capture both morphology and temporal dynamics.
-* **Latent Space Exploration (UMAP):** The UMAP projection of the latent space embeddings from the validation dataset revealed a highly structured space, demonstrating the model's ability to cluster distinct cell states. The coloring was added post-hoc for visualization:
-    * **Biological Clusters (A-D):** Latent space exploration revealed specific regions for **apoptotic cells (B)**, and detailed clusters for various phases of **mitosis**: metaphase to anaphase (A), telophase to cytokinesis (C), and a potentially novel cell state characterized by abortive mitosis during metaphase (D).
-    * **Technical/Artifact Clusters (E-H):** The model also successfully separated crops corresponding to technical failures, underlining the robustness of the temporal encoding. These clusters included crops with **tracking errors** consistently appearing in specific frames (E and F), cells out of the **focal plane (G, epithelial extrusion)**, and crops displaying a characteristic **grainy texture** likely due to imaging artifacts (H).
+* **Unsupervised Feature Extraction:** The temporal channel-encoded crops served as input to the scDINO Vision Transformer (ViT). The model learns representations that capture both morphology and temporal dynamics without any labels.
+* **Latent Space Exploration (UMAP):** The UMAP projection of the latent space embeddings from the validation dataset, the coloring was added post-hoc for visualization:
+    * **Biological Clusters (A-D):** Specific regions for **apoptotic cells (B)**, and detailed clusters for various phases of **mitosis**: metaphase to anaphase (A), telophase to cytokinesis (C), and a potentially novel cell state characterized by abortive mitosis during metaphase (D).
+    * **Technical/Artifact Clusters (E-H):** Technical failures, underlining the robustness of the temporal encoding. These clusters included crops with **tracking errors** consistently appearing in specific frames (E and F), cells out of the **focal plane (G, epithelial extrusion)**, and crops displaying a characteristic **grainy texture** likely due to imaging artifacts (H).
 
 This application demonstrates the pipeline's effectiveness in generating training data optimized for state-of-the-art unsupervised representation learning in single-cell microscopy.
 
